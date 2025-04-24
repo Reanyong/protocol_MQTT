@@ -97,12 +97,10 @@ bool CJsonParser::ParseMessage(const char* payload, int length)
 
 void CJsonParser::TraceEventData()
 {
-    // 유니코드 문자열을 사용하여 한글이 올바르게 표시되도록 함
     OutputDebugStringW(L"--- JSON Parsing ---\n");
 
     wchar_t buffer[1024];
 
-    // %hs는 멀티바이트 문자열을 와이드 문자열로 변환함
     swprintf_s(buffer, L"Code: %hs\n", m_eventData.code.c_str());
     OutputDebugStringW(buffer);
 

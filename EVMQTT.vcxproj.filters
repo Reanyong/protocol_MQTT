@@ -13,12 +13,21 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Dialog">
+      <UniqueIdentifier>{a75d7ec0-e424-4ad4-be2c-650ac765f0b8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="JSON">
+      <UniqueIdentifier>{73098f45-5484-4aee-9ddc-defa826b0341}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Func">
+      <UniqueIdentifier>{a51de047-7279-4296-aa2d-b21c7a2bedf5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Thread">
+      <UniqueIdentifier>{67571134-fd61-4cd7-95f9-ada37c3109bf}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="EVMQTT.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
-    <ClInclude Include="EVMQTTDlg.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="framework.h">
@@ -33,28 +42,37 @@
     <ClInclude Include="pch.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
-    <ClInclude Include="ThreadSub.h">
-      <Filter>헤더 파일</Filter>
+    <ClInclude Include="EVMQTTDlg.h">
+      <Filter>Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="ConfigManager.h">
+      <Filter>Func</Filter>
     </ClInclude>
     <ClInclude Include="ParserJSON.h">
-      <Filter>헤더 파일</Filter>
+      <Filter>JSON</Filter>
+    </ClInclude>
+    <ClInclude Include="ThreadSub.h">
+      <Filter>Thread</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="EVMQTT.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="EVMQTTDlg.cpp">
-      <Filter>소스 파일</Filter>
-    </ClCompile>
     <ClCompile Include="pch.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="ThreadSub.cpp">
-      <Filter>소스 파일</Filter>
+    <ClCompile Include="EVMQTTDlg.cpp">
+      <Filter>Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="ConfigManager.cpp">
+      <Filter>Func</Filter>
     </ClCompile>
     <ClCompile Include="ParserJSON.cpp">
-      <Filter>소스 파일</Filter>
+      <Filter>JSON</Filter>
+    </ClCompile>
+    <ClCompile Include="ThreadSub.cpp">
+      <Filter>Thread</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
