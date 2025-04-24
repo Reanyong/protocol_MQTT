@@ -54,6 +54,12 @@
     <ClInclude Include="ThreadSub.h">
       <Filter>Thread</Filter>
     </ClInclude>
+    <ClInclude Include="JsonFileManager.h">
+      <Filter>JSON</Filter>
+    </ClInclude>
+    <ClInclude Include="JsonResultManager.h">
+      <Filter>JSON</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="EVMQTT.cpp">
@@ -73,6 +79,12 @@
     </ClCompile>
     <ClCompile Include="ThreadSub.cpp">
       <Filter>Thread</Filter>
+    </ClCompile>
+    <ClCompile Include="JsonFileManager.cpp">
+      <Filter>JSON</Filter>
+    </ClCompile>
+    <ClCompile Include="JsonResultManager.cpp">
+      <Filter>JSON</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

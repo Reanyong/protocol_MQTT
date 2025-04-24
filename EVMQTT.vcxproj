@@ -192,6 +192,8 @@
   <ItemGroup>
     <ClInclude Include="ConfigManager.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="JsonFileManager.h" />
+    <ClInclude Include="JsonResultManager.h" />
     <ClInclude Include="ParserJSON.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Resource.h" />
@@ -202,6 +204,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ConfigManager.cpp" />
+    <ClCompile Include="JsonFileManager.cpp" />
+    <ClCompile Include="JsonResultManager.cpp" />
     <ClCompile Include="ParserJSON.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>

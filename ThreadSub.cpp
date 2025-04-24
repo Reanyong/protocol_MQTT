@@ -4,6 +4,9 @@
 #include "pch.h"
 #include "EVMQTT.h"
 #include "ThreadSub.h"
+#include "ConfigManager.h"
+#include "JsonFileManager.h"
+#include "JsonResultManager.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -118,6 +121,7 @@ int CThreadSub::Run()
 
 	DWORD dwCur = GetTickCount();
 	DWORD dwOld = dwCur;
+	DWORD dwLastParsing = dwCur;
 
 	int nErrorCode = 1;
 	int nNetworkLoop;
@@ -153,19 +157,75 @@ int CThreadSub::Run()
 
 	mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
 
-	while(!m_bEndThread)
+	// 설정 로드
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	configManager.LoadConfig();
+
+	// JSON 파일 관리자
+	CJsonFileManager& fileManager = CJsonFileManager::GetInstance();
+
+	// 결과 관리자
+	CJsonResultManager& resultManager = CJsonResultManager::GetInstance();
+
+	// 초기에 한 번 폴더 스캔
+	if (!configManager.GetJsonFolderPath().IsEmpty()) {
+		fileManager.ScanJsonFolder(configManager.GetJsonFolderPath(), configManager.GetSortMethod());
+	}
+
+	while (!m_bEndThread)
 	{
 		Sleep(2);
 
 		dwCur = GetTickCount();
-		if(dwCur - dwOld >= 1000)
+		if (dwCur - dwOld >= 1000)
 		{
 			dwOld = dwCur;
 			GetLocalTime(&tmCur);
 
-			if(tmOld.wMinute != tmCur.wMinute)
+			if (tmOld.wMinute != tmCur.wMinute)
 			{
 				tmOld = tmCur;
+
+				// 1분마다 JSON 파일 폴더 다시 스캔
+				if (!configManager.GetJsonFolderPath().IsEmpty()) {
+					fileManager.ScanJsonFolder(configManager.GetJsonFolderPath(), configManager.GetSortMethod());
+				}
+			}
+		}
+
+		// 파싱 간격 체크 (기본 1초)
+		int parsingInterval = configManager.GetParsingInterval();
+		if (dwCur - dwLastParsing >= static_cast<DWORD>(parsingInterval)) {
+			dwLastParsing = dwCur;
+
+			// 처리할 파일이 있으면 파싱 실행
+			if (fileManager.GetPendingCount() > 0) {
+				JsonFileData fileData = fileManager.GetNextPendingFile();
+				if (!fileData.filePath.IsEmpty()) {
+					try {
+						// JSON 파싱
+						CJsonParser jsonParser;
+						if (jsonParser.ParseMessage(fileData.content.c_str(), fileData.content.length())) {
+							// 디버그 출력
+							jsonParser.TraceEventData();
+
+							// 결과 저장
+							resultManager.StoreResult(fileData.filePath, jsonParser.GetEventData());
+
+							// 처리 완료 표시
+							fileManager.MarkFileAsProcessed(fileData.filePath);
+
+							OutputDebugString(_T("파일 파싱 성공: "));
+							OutputDebugString(fileData.filePath);
+							OutputDebugString(_T("\n"));
+						}
+					}
+					catch (const std::exception& e) {
+						OutputDebugString(_T("파싱 중 오류 발생: "));
+						OutputDebugStringA(e.what());
+						OutputDebugString(_T("\n"));
+					}
+				}
 			}
 		}
 
@@ -177,7 +237,8 @@ int CThreadSub::Run()
 			mosquitto_reconnect(mosq);
 
 			nErrorCode = -100;
-		} else if(nErrorCode < 1)
+		}
+		else if (nErrorCode < 1)
 			nErrorCode = 1;
 	}
 
