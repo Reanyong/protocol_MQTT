@@ -164,9 +164,22 @@ void PeekMessages()
 
 void CEVMQTTDlg::OnBnClickedBtnSub()
 {
-	StopThreadSub();
-	DeleteThreadSub();
-	BeginThreadSub();
+	CWnd* pBtn = GetDlgItem(IDC_BTN_SUB);
+	if (m_pThreadSub == NULL)
+	{
+		// 스레드가 없는 상태 - 시작
+		BeginThreadSub();
+		// 버튼 텍스트를 '종료'로 변경
+		pBtn->SetWindowText(_T("통신 종료"));
+	}
+	else
+	{
+		// 스레드가 실행 중인 상태 - 종료
+		StopThreadSub();
+		DeleteThreadSub();
+		// 버튼 텍스트를 '시작'으로 변경
+		pBtn->SetWindowText(_T("통신 시작"));
+	}
 }
 
 void CEVMQTTDlg::OnBnClickedOk()

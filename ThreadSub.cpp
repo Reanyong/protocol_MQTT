@@ -11,6 +11,8 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
+CJsonParser CThreadSub::s_jsonParser;
+
 /////////////////////////////////////////////////////////////////////////////
 // CThreadSub
 
@@ -68,6 +70,42 @@ void message_callback(struct mosquitto* mosq, void* obj, const struct mosquitto_
 		return;
 
 	TRACE("topic '%s': message %s[%d] bytes\n", msg->topic, (char*)msg->payload, msg->payloadlen);
+
+	const char* payload = (const char*)msg->payload;
+	if (payload[0] != '{' && payload[0] != '[') {
+		TRACE("수신된 메시지가 JSON 형식이 아닙니다: %s\n", payload);
+		return; // JSON이 아니면 파싱하지 않고 종료
+	}
+
+	// JSON 메시지 파싱
+	if (CThreadSub::s_jsonParser.ParseMessage(payload, msg->payloadlen)) {
+		// 파싱 결과 출력
+		CThreadSub::s_jsonParser.TraceEventData();
+
+		// 여기서 파싱된 데이터를 사용하여 추가 처리 수행
+		// 예: UI 업데이트, 데이터베이스 저장 등
+		const CJsonParser::EventData& eventData = CThreadSub::s_jsonParser.GetEventData();
+
+		// 이벤트 코드가 "event"인 경우에만 처리
+		if (eventData.code == "event") {
+			// 필요한 처리 수행...
+
+			// 예: 타이머 카운터 값이 변경된 경우 처리
+			if (eventData.timerCounter.valid) {
+				// 타이머 카운터 관련 처리
+			}
+
+			// 예: 온도 값이 변경된 경우 처리
+			if (eventData.temperature.valid) {
+				// 온도 관련 처리
+			}
+
+			// 예: IOLink 데이터가 변경된 경우 처리
+			if (eventData.iolinkDevice.valid) {
+				// IOLink 관련 처리
+			}
+		}
+	}
 }
 
 int CThreadSub::Run()

@@ -36,6 +36,9 @@
     <ClInclude Include="ThreadSub.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="ParserJSON.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="EVMQTT.cpp">
@@ -48,6 +51,9 @@
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="ThreadSub.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="ParserJSON.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>

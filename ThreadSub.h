@@ -7,6 +7,8 @@
 // ThreadSub.h : header file
 //
 
+#include "ParserJSON.h"
+
 /////////////////////////////////////////////////////////////////////////////
 // CThreadSub thread
 
@@ -30,6 +32,8 @@ public:
 	void	Stop() { m_bEndThread = TRUE; }
 
 // Operations
+	// JSON 파서 인스턴스
+	static CJsonParser s_jsonParser;
 public:
 
 // Overrides
