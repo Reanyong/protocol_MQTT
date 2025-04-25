@@ -53,6 +53,7 @@ void CEVMQTTDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_STATIC_STATS, m_staticStats);
+	DDX_Control(pDX, IDC_LIST_DEBUG, m_listDebug);
 }
 
 BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
@@ -63,6 +64,8 @@ BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
 	ON_BN_CLICKED(IDOK, &CEVMQTTDlg::OnBnClickedOk)
 	ON_BN_CLICKED(IDCANCEL, &CEVMQTTDlg::OnBnClickedCancel)
 	ON_MESSAGE(WM_USER + 100, OnUpdateStats)
+	//ON_BN_CLICKED(IDC_BUTTON_CLEAR_LOG, &CEVMQTTDlg::OnBnClickedButtonClearLog)
+	ON_MESSAGE(WM_USER + 101, OnUpdateDebugLog)
 END_MESSAGE_MAP()
 
 
@@ -100,6 +103,8 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	m_nParsedCount = 0;
 	m_nTotalCount = 0;
 	UpdateParsingStats(0, 0);
+
+	InitDebugList();
 
 	// TODO: 여기에 추가 초기화 작업을 추가합니다.
 
@@ -279,9 +284,30 @@ void CEVMQTTDlg::UpdateParsingStats(int parsedCount, int totalCount)
 	m_nParsedCount = parsedCount;
 	m_nTotalCount = totalCount;
 
+	TRACE("UpdateParsingStats: m_nParsedCount=%d, m_nTotalCount=%d\n", m_nParsedCount, m_nTotalCount);
+
+	// 포맷 문자열 수정 - %d가 아닌 %ld로 변경해볼 것
 	CString statsText;
-	statsText.Format(_T("json 파싱 결과: %d / %d"), m_nParsedCount, m_nTotalCount);
-	m_staticStats.SetWindowText(statsText);
+	statsText.Format(_T("json 파싱 결과: %ld / %ld"), (long)m_nParsedCount, (long)m_nTotalCount);
+	// 또는 다른 방식으로 시도:
+	// CString statsText;
+	// statsText.Format(_T("json 파싱 결과: %d / %d"), (int)m_nParsedCount, (int)m_nTotalCount);
+
+	TRACE("statsText: %s\n", (LPCTSTR)statsText);
+
+	// 컨트롤이 있는지 확인하고 텍스트 설정
+	if (::IsWindow(m_staticStats.GetSafeHwnd()))
+	{
+		m_staticStats.SetWindowText(statsText);
+
+		// 강제 갱신 시도
+		m_staticStats.Invalidate();
+		m_staticStats.UpdateWindow();
+	}
+	else
+	{
+		TRACE("m_staticStats is not a valid window!\n");
+	}
 }
 
 // 메시지 핸들러 구현
@@ -289,6 +315,124 @@ LRESULT CEVMQTTDlg::OnUpdateStats(WPARAM wParam, LPARAM lParam)
 {
 	int parsedCount = (int)wParam;
 	int totalCount = (int)lParam;
+
+	TRACE("OnUpdateStats: parsedCount=%d, totalCount=%d\n", parsedCount, totalCount);
+
 	UpdateParsingStats(parsedCount, totalCount);
+	return 0;
+}
+
+// 디버그 리스트 초기화
+void CEVMQTTDlg::InitDebugList()
+{
+	// 리스트 컨트롤 스타일 설정
+	DWORD dwStyle = m_listDebug.GetExtendedStyle();
+	m_listDebug.SetExtendedStyle(dwStyle | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+
+	// 컬럼 추가
+	m_listDebug.InsertColumn(0, _T("파일명"), LVCFMT_LEFT, 150);
+	m_listDebug.InsertColumn(1, _T("상태"), LVCFMT_CENTER, 60);
+	m_listDebug.InsertColumn(2, _T("시간"), LVCFMT_LEFT, 70);
+	m_listDebug.InsertColumn(3, _T("메시지"), LVCFMT_LEFT, 300);
+}
+
+// 디버그 로그 추가
+void CEVMQTTDlg::AddDebugLog(const CString& message, const CString& filePath, DebugLogItem::LogType type)
+{
+	//std::lock_guard<std::mutex> lock(m_logMutex);
+	CSingleLock lock(&m_logMutex, TRUE);
+
+	DebugLogItem logItem;
+	logItem.message = message;
+	logItem.filePath = filePath;
+	logItem.type = type;
+	logItem.timestamp = CTime::GetCurrentTime();
+
+	m_debugLogs.push_back(logItem);
+
+	OutputDebugString(_T("로그 추가됨: "));
+	OutputDebugString(message);
+	OutputDebugString(_T("\n"));
+
+	// UI 업데이트 메시지 전송
+	PostMessage(WM_USER + 101, 0, 0);
+}
+
+// 디버그 리스트 업데이트
+void CEVMQTTDlg::UpdateDebugList()
+{
+	//std::lock_guard<CCriticalSection> lock(m_logMutex); // CCriticalSection 사용
+	CSingleLock lock(&m_logMutex, TRUE);
+
+	// 현재 표시된 아이템 수
+	int currentCount = m_listDebug.GetItemCount();
+	int logCount = (int)m_debugLogs.size();
+
+	// 새로운 로그만 추가 (성능 최적화)
+	for (int i = currentCount; i < logCount; i++)
+	{
+		const DebugLogItem& logItem = m_debugLogs[i];
+
+		// 파일명 추출 (경로에서)
+		CString fileName = logItem.filePath;
+		if (!fileName.IsEmpty())
+		{
+			int pos = fileName.ReverseFind('\\');
+			if (pos >= 0)
+				fileName = fileName.Mid(pos + 1);
+		}
+
+		// 상태 텍스트 및 색상
+		CString strStatus;
+		COLORREF textColor = RGB(0, 0, 0);
+
+		switch (logItem.type)
+		{
+		case DebugLogItem::LOG_INFO:
+			strStatus = _T("정보");
+			textColor = RGB(0, 0, 0); // 검은색
+			break;
+		case DebugLogItem::LOG_SUCCESS:
+			strStatus = _T("성공");
+			textColor = RGB(0, 128, 0); // 녹색
+			break;
+		case DebugLogItem::LOG_WARNING:
+			strStatus = _T("경고");
+			textColor = RGB(255, 128, 0); // 주황색
+			break;
+		case DebugLogItem::LOG_ERROR:
+			strStatus = _T("오류");
+			textColor = RGB(255, 0, 0); // 빨간색
+			break;
+		}
+
+		// 시간 포맷팅
+		CString strTime = logItem.timestamp.Format(_T("%H:%M:%S"));
+
+		// 컬럼 순서에 맞게 항목 추가: 파일명, 상태, 시간, 메시지
+		int nItem = m_listDebug.InsertItem(currentCount + i, fileName); // 파일명
+		m_listDebug.SetItemText(nItem, 1, strStatus); // 상태
+		m_listDebug.SetItemText(nItem, 2, strTime); // 시간
+		m_listDebug.SetItemText(nItem, 3, logItem.message); // 메시지
+
+		// 맨 아래로 스크롤
+		m_listDebug.EnsureVisible(nItem, FALSE);
+	}
+}
+
+// 로그 지우기 버튼 핸들러
+void CEVMQTTDlg::OnBnClickedButtonClearLog()
+{
+	//std::lock_guard<std::mutex> lock(m_logMutex);
+	CSingleLock lock(&m_logMutex, TRUE);
+
+	m_debugLogs.clear();
+	m_listDebug.DeleteAllItems();
+}
+
+// 디버그 로그 업데이트 메시지 핸들러
+LRESULT CEVMQTTDlg::OnUpdateDebugLog(WPARAM wParam, LPARAM lParam)
+{
+	UpdateDebugList();
 	return 0;
 }

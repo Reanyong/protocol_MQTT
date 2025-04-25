@@ -3,6 +3,7 @@
 
 #include "pch.h"
 #include "EVMQTT.h"
+#include "EVMQTTDlg.h"
 #include "ThreadSub.h"
 #include "ConfigManager.h"
 #include "JsonFileManager.h"
@@ -297,6 +298,8 @@ void CThreadSub::UpdateStats(int parsedCount, int totalCount)
 
     if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
     {
+        TRACE("UpdateStats: parsedCount=%d, totalCount=%d\n", parsedCount, totalCount);
+
         // UI 스레드에 메시지 전송
         ::PostMessage(m_pOwner->GetSafeHwnd(), WM_USER + 100, parsedCount, totalCount);
     }

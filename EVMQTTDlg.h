@@ -1,8 +1,24 @@
-﻿//
-
-#pragma once
+﻿#pragma once
 
 #include "ThreadSub.h"
+
+// 디버그 로그 항목 구조체
+struct DebugLogItem
+{
+	enum LogType {
+		LOG_INFO,    // 일반 정보
+		LOG_SUCCESS, // 성공
+		LOG_WARNING, // 경고
+		LOG_ERROR    // 오류
+	};
+
+	CString message;      // 로그 메시지
+	CString filePath;     // 관련 파일 경로
+	LogType type;         // 로그 유형
+	CTime timestamp;      // 로그 시간
+
+	DebugLogItem() : type(LOG_INFO) {}
+};
 
 class CEVMQTTDlg : public CDialogEx
 {
@@ -35,7 +51,13 @@ protected:
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();
+
+	// 파싱 통계 관련 함수
 	afx_msg LRESULT OnUpdateStats(WPARAM wParam, LPARAM lParam);
+
+	// 디버그 관련 함수
+	afx_msg void OnBnClickedButtonClearLog();
+	afx_msg LRESULT OnUpdateDebugLog(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
 public:
@@ -43,11 +65,21 @@ public:
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnBnClickedCancel();
 
-	CStatic m_staticStats;	// 파싱 통계 표시
-
+	// 파싱 통계 관련
+	CStatic m_staticStats;
 	void UpdateParsingStats(int parsedCount, int totalCount);
+
+	// 디버그 관련
+	CListCtrl m_listDebug;
+	void InitDebugList();
+	void AddDebugLog(const CString& message, const CString& filePath = _T(""), DebugLogItem::LogType type = DebugLogItem::LOG_INFO);
+	void UpdateDebugList();
 
 private:
 	int m_nParsedCount;       // 파싱 성공 파일 수
 	int m_nTotalCount;        // 총 JSON 파일 수
+
+	std::vector<DebugLogItem> m_debugLogs;
+	//mutable std::mutex m_logMutex;
+	CCriticalSection m_logMutex;
 };

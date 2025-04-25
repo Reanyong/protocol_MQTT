@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "JsonFileManager.h"
+#include "EVMQTTDlg.h"
 
 CJsonFileManager::CJsonFileManager()
 {
@@ -24,6 +25,11 @@ bool CJsonFileManager::LoadJsonFile(const CString& filePath)
             OutputDebugString(_T("File does not exist: "));
             OutputDebugString(filePath);
             OutputDebugString(_T("\n"));
+
+            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)AfxGetMainWnd();
+            if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+                pDlg->AddDebugLog(_T("파일이 존재하지 않습니다"), filePath, DebugLogItem::LOG_ERROR);
+            }
             return false;
         }
 
@@ -285,5 +291,8 @@ bool CJsonFileManager::CompareByModified(const FileInfo& a, const FileInfo& b)
 size_t CJsonFileManager::GetTotalJsonCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
+
+    TRACE("GetTotalJsonCount: %d\n", (int)m_jsonFiles.size()); // 디버그 추가
+
     return m_jsonFiles.size();
 }
