@@ -35,10 +35,19 @@ protected:
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();
+	afx_msg LRESULT OnUpdateStats(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
 public:
 	afx_msg void OnBnClickedBtnSub();
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnBnClickedCancel();
+
+	CStatic m_staticStats;	// 파싱 통계 표시
+
+	void UpdateParsingStats(int parsedCount, int totalCount);
+
+private:
+	int m_nParsedCount;       // 파싱 성공 파일 수
+	int m_nTotalCount;        // 총 JSON 파일 수
 };

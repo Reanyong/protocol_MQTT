@@ -1,4 +1,4 @@
-#if !defined(AFX_THREADSUB_H__0D927586_1ECD_4104_ACF7_E40BD0064638__INCLUDED_)
+﻿#if !defined(AFX_THREADSUB_H__0D927586_1ECD_4104_ACF7_E40BD0064638__INCLUDED_)
 #define AFX_THREADSUB_H__0D927586_1ECD_4104_ACF7_E40BD0064638__INCLUDED_
 
 #if _MSC_VER > 1000
@@ -32,7 +32,7 @@ public:
 	void	Stop() { m_bEndThread = TRUE; }
 
 // Operations
-	// JSON �ļ� �ν��Ͻ�
+	// JSON 파서 인스턴스
 	static CJsonParser s_jsonParser;
 public:
 
@@ -44,6 +44,26 @@ public:
 	virtual int ExitInstance();
 	virtual int Run();
 	//}}AFX_VIRTUAL
+
+	// 파싱 통계 함수
+	void UpdateStats(int parsedCount, int totalCount);
+
+private:
+	HANDLE m_hChangeNotification;    // 디렉토리 변경 알림 핸들
+	OVERLAPPED m_overlapped;         // 비동기 I/O용 OVERLAPPED 구조체
+	char m_buffer[8192];             // 변경 정보를 저장할 버퍼
+	DWORD m_bytesReturned;           // 반환된 바이트 수
+	HANDLE m_directoryHandle;        // 디렉토리 핸들
+	bool m_bWatchDirectory;          // 디렉토리 감시 활성화 플래그
+
+	// 파싱 통계 변수
+	int m_nParsedCount;   // 파싱 성공 파일 수
+	int m_nTotalCount;    // 총 JSON 파일 수
+
+public:
+	bool StartDirectoryWatch(const CString& folderPath);
+	void StopDirectoryWatch();
+	void ProcessDirectoryChanges();
 
 // Implementation
 protected:

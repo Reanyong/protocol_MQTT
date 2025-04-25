@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 #include <vector>
 #include <map>
@@ -45,6 +45,9 @@ public:
 
     // 싱글톤 패턴
     static CJsonFileManager& GetInstance();
+
+    // total json file convert
+    size_t GetTotalJsonCount() const;
 
 private:
     std::map<CString, JsonFileData> m_jsonFiles;     // 파일 데이터 맵 (키: 파일경로)

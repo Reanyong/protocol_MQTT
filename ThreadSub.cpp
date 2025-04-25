@@ -1,4 +1,4 @@
-// CThreadSub.cpp : implementation file
+ï»¿// CThreadSub.cpp : implementation file
 //
 
 #include "pch.h"
@@ -14,6 +14,8 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
+#pragma execution_character_set("utf-8")
+
 CJsonParser CThreadSub::s_jsonParser;
 
 /////////////////////////////////////////////////////////////////////////////
@@ -23,35 +25,52 @@ IMPLEMENT_DYNCREATE(CThreadSub, CWinThread)
 
 CThreadSub::CThreadSub()
 {
-	m_bAutoDelete = FALSE;
-	m_pOwner = NULL;
-	m_bEndThread = FALSE;
-	pParam = NULL;
+    m_bAutoDelete = FALSE;
+    m_pOwner = NULL;
+    m_bEndThread = FALSE;
+    pParam = NULL;
 
-	sprintf_s(m_szIP, sizeof(m_szIP), "127.0.0.1");
-	sprintf_s(m_szTopic, sizeof(m_szTopic), "my_topic");
-	m_nPort = 1883;
-	m_nKeepAlive = 60;
+    sprintf_s(m_szIP, sizeof(m_szIP), "127.0.0.1");
+    sprintf_s(m_szTopic, sizeof(m_szTopic), "my_topic");
+    m_nPort = 1883;
+    m_nKeepAlive = 60;
+
+    m_directoryHandle = INVALID_HANDLE_VALUE;
+    m_overlapped.hEvent = NULL;
+    m_bWatchDirectory = false;
+
+    // íŒŒì‹± í†µê³„ ì´ˆê¸°í™”
+    m_nParsedCount = 0;
+    m_nTotalCount = 0;
 }
 
 CThreadSub::~CThreadSub()
 {
+    StopDirectoryWatch();
 }
 
 BOOL CThreadSub::InitInstance()
 {
-	return TRUE;
+
+    CString folderPath = CConfigManager::GetInstance().GetJsonFolderPath();
+    if (!folderPath.IsEmpty())
+    {
+        StartDirectoryWatch(folderPath);
+    }
+
+
+    return TRUE;
 }
 
 int CThreadSub::ExitInstance()
 {
-	return CWinThread::ExitInstance();
+    return CWinThread::ExitInstance();
 }
 
 BEGIN_MESSAGE_MAP(CThreadSub, CWinThread)
-	//{{AFX_MSG_MAP(CThreadSub)
-		// NOTE - the ClassWizard will add and remove mapping macros here.
-	//}}AFX_MSG_MAP
+    //{{AFX_MSG_MAP(CThreadSub)
+        // NOTE - the ClassWizard will add and remove mapping macros here.
+    //}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
@@ -64,192 +83,516 @@ END_MESSAGE_MAP()
 
 void connect_callback(struct mosquitto* mosq, void* obj, int result)
 {
-	TRACE("connect callback, rc=%d\n", result);
+    TRACE("connect callback, rc=%d\n", result);
 }
 
 void message_callback(struct mosquitto* mosq, void* obj, const struct mosquitto_message* msg)
 {
-	if (msg->payloadlen == 0)
-		return;
+    if (msg->payloadlen == 0)
+        return;
 
-	TRACE("topic '%s': message %s[%d] bytes\n", msg->topic, (char*)msg->payload, msg->payloadlen);
+    TRACE("topic '%s': message %s[%d] bytes\n", msg->topic, (char*)msg->payload, msg->payloadlen);
 
-	const char* payload = (const char*)msg->payload;
-	if (payload[0] != '{' && payload[0] != '[') {
-		TRACE("¼ö½ÅµÈ ¸Þ½ÃÁö°¡ JSON Çü½ÄÀÌ ¾Æ´Õ´Ï´Ù: %s\n", payload);
-		return; // JSONÀÌ ¾Æ´Ï¸é ÆÄ½ÌÇÏÁö ¾Ê°í Á¾·á
-	}
+    const char* payload = (const char*)msg->payload;
+    if (payload[0] != '{' && payload[0] != '[') {
+        TRACE("Received message is not in JSON format: %s\n", payload);
+        return; // JSONì´ ì•„ë‹ˆë©´ íŒŒì‹±í•˜ì§€ ì•Šê³  ì¢…ë£Œ
+    }
 
-	// JSON ¸Þ½ÃÁö ÆÄ½Ì
-	if (CThreadSub::s_jsonParser.ParseMessage(payload, msg->payloadlen)) {
-		// ÆÄ½Ì °á°ú Ãâ·Â
-		CThreadSub::s_jsonParser.TraceEventData();
+    // JSON ë©”ì‹œì§€ íŒŒì‹±
+    if (CThreadSub::s_jsonParser.ParseMessage(payload, msg->payloadlen)) {
+        // íŒŒì‹± ê²°ê³¼ ì¶œë ¥
+        CThreadSub::s_jsonParser.TraceEventData();
 
-		// ¿©±â¼­ ÆÄ½ÌµÈ µ¥ÀÌÅÍ¸¦ »ç¿ëÇÏ¿© Ãß°¡ Ã³¸® ¼öÇà
-		// ¿¹: UI ¾÷µ¥ÀÌÆ®, µ¥ÀÌÅÍº£ÀÌ½º ÀúÀå µî
-		const CJsonParser::EventData& eventData = CThreadSub::s_jsonParser.GetEventData();
+        // ì—¬ê¸°ì„œ íŒŒì‹±ëœ ë°ì´í„°ë¥¼ ì‚¬ìš©í•˜ì—¬ ì¶”ê°€ ì²˜ë¦¬ ìˆ˜í–‰
+        // ì˜ˆ: UI ì—…ë°ì´íŠ¸, ë°ì´í„°ë² ì´ìŠ¤ ì €ìž¥ ë“±
+        const CJsonParser::EventData& eventData = CThreadSub::s_jsonParser.GetEventData();
 
-		// ÀÌº¥Æ® ÄÚµå°¡ "event"ÀÎ °æ¿ì¿¡¸¸ Ã³¸®
-		if (eventData.code == "event") {
-			// ÇÊ¿äÇÑ Ã³¸® ¼öÇà...
+        // ì´ë²¤íŠ¸ ì½”ë“œê°€ "event"ì¸ ê²½ìš°ì—ë§Œ ì²˜ë¦¬
+        if (eventData.code == "event") {
+            // í•„ìš”í•œ ì²˜ë¦¬ ìˆ˜í–‰...
 
-			// ¿¹: Å¸ÀÌ¸Ó Ä«¿îÅÍ °ªÀÌ º¯°æµÈ °æ¿ì Ã³¸®
-			if (eventData.timerCounter.valid) {
-				// Å¸ÀÌ¸Ó Ä«¿îÅÍ °ü·Ã Ã³¸®
-			}
+            // ì˜ˆ: íƒ€ì´ë¨¸ ì¹´ìš´í„° ê°’ì´ ë³€ê²½ëœ ê²½ìš° ì²˜ë¦¬
+            if (eventData.timerCounter.valid) {
+                // íƒ€ì´ë¨¸ ì¹´ìš´í„° ê´€ë ¨ ì²˜ë¦¬
+            }
 
-			// ¿¹: ¿Âµµ °ªÀÌ º¯°æµÈ °æ¿ì Ã³¸®
-			if (eventData.temperature.valid) {
-				// ¿Âµµ °ü·Ã Ã³¸®
-			}
+            // ì˜ˆ: ì˜¨ë„ ê°’ì´ ë³€ê²½ëœ ê²½ìš° ì²˜ë¦¬
+            if (eventData.temperature.valid) {
+                // ì˜¨ë„ ê´€ë ¨ ì²˜ë¦¬
+            }
 
-			// ¿¹: IOLink µ¥ÀÌÅÍ°¡ º¯°æµÈ °æ¿ì Ã³¸®
-			if (eventData.iolinkDevice.valid) {
-				// IOLink °ü·Ã Ã³¸®
-			}
-		}
-	}
+            // ì˜ˆ: IOLink ë°ì´í„°ê°€ ë³€ê²½ëœ ê²½ìš° ì²˜ë¦¬
+            if (eventData.iolinkDevice.valid) {
+                // IOLink ê´€ë ¨ ì²˜ë¦¬
+            }
+        }
+    }
+}
+
+bool CThreadSub::StartDirectoryWatch(const CString& folderPath)
+{
+    // ì´ë¯¸ ê°ì‹œ ì¤‘ì´ë©´ ì¤‘ì§€
+    if (m_directoryHandle != INVALID_HANDLE_VALUE)
+    {
+        StopDirectoryWatch();
+    }
+
+    // ë””ë ‰í† ë¦¬ í•¸ë“¤ ì—´ê¸°
+    m_directoryHandle = CreateFile(
+        folderPath,                             // ê°ì‹œí•  ë””ë ‰í† ë¦¬ ê²½ë¡œ
+        FILE_LIST_DIRECTORY,                    // ë””ë ‰í† ë¦¬ ì ‘ê·¼ ê¶Œí•œ
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, // ê³µìœ  ëª¨ë“œ
+        NULL,                                   // ë³´ì•ˆ ì†ì„±
+        OPEN_EXISTING,                          // ì—´ê¸° ì˜µì…˜
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, // íŒŒì¼ ì†ì„±
+        NULL);                                  // í…œí”Œë¦¿ íŒŒì¼
+
+    if (m_directoryHandle == INVALID_HANDLE_VALUE)
+    {
+        TRACE(_T("Failed to open directory handle: %d\n"), GetLastError());
+        return false;
+    }
+
+    // OVERLAPPED êµ¬ì¡°ì²´ ì´ˆê¸°í™”
+    ZeroMemory(&m_overlapped, sizeof(OVERLAPPED));
+    m_overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (m_overlapped.hEvent == NULL)
+    {
+        TRACE(_T("Failed to create event: %d\n"), GetLastError());
+        CloseHandle(m_directoryHandle);
+        m_directoryHandle = INVALID_HANDLE_VALUE;
+        return false;
+    }
+
+    // ë³€ê²½ ê°ì‹œ ì‹œìž‘
+    m_bWatchDirectory = true;
+
+    // ë¹„ë™ê¸° ë””ë ‰í† ë¦¬ ë³€ê²½ ê°ì‹œ ì‹œìž‘
+    BOOL success = ReadDirectoryChangesW(
+        m_directoryHandle,                      // ë””ë ‰í† ë¦¬ í•¸ë“¤
+        m_buffer,                               // ê²°ê³¼ ë²„í¼
+        sizeof(m_buffer),                       // ë²„í¼ í¬ê¸°
+        FALSE,                                  // í•˜ìœ„ ë””ë ‰í† ë¦¬ í¬í•¨ ì—¬ë¶€
+        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE, // ê°ì‹œí•  ë³€ê²½ ìœ í˜•
+        &m_bytesReturned,                       // ë°˜í™˜ëœ ë°”ì´íŠ¸ ìˆ˜
+        &m_overlapped,                          // OVERLAPPED êµ¬ì¡°ì²´
+        NULL);                                  // ì™„ë£Œ ë£¨í‹´
+
+    if (!success)
+    {
+        TRACE(_T("ReadDirectoryChangesW failed: %d\n"), GetLastError());
+        CloseHandle(m_overlapped.hEvent);
+        CloseHandle(m_directoryHandle);
+        m_directoryHandle = INVALID_HANDLE_VALUE;
+        return false;
+    }
+
+    return true;
+}
+
+void CThreadSub::StopDirectoryWatch()
+{
+    m_bWatchDirectory = false;
+
+    if (m_overlapped.hEvent != NULL)
+    {
+        CloseHandle(m_overlapped.hEvent);
+        m_overlapped.hEvent = NULL;
+    }
+
+    if (m_directoryHandle != INVALID_HANDLE_VALUE)
+    {
+        CancelIo(m_directoryHandle);
+        CloseHandle(m_directoryHandle);
+        m_directoryHandle = INVALID_HANDLE_VALUE;
+    }
+}
+
+void CThreadSub::ProcessDirectoryChanges()
+{
+    if (!m_bWatchDirectory || m_directoryHandle == INVALID_HANDLE_VALUE)
+        return;
+
+    // ë³€ê²½ ì´ë²¤íŠ¸ ëŒ€ê¸°
+    DWORD waitResult = WaitForSingleObject(m_overlapped.hEvent, 100); // 100ms íƒ€ìž„ì•„ì›ƒ
+
+    if (waitResult == WAIT_OBJECT_0)
+    {
+        // ë¹„ë™ê¸° I/O ì™„ë£Œ í™•ì¸
+        DWORD bytesTransferred = 0;
+        if (GetOverlappedResult(m_directoryHandle, &m_overlapped, &bytesTransferred, FALSE))
+        {
+            if (bytesTransferred > 0)
+            {
+                // ë²„í¼ ì²˜ë¦¬
+                FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION*)m_buffer;
+
+                for (;;)
+                {
+                    // íŒŒì¼ ì´ë¦„ ë³€í™˜
+                    WCHAR fileName[MAX_PATH] = { 0 };
+                    wcsncpy_s(fileName, MAX_PATH, pNotify->FileName, pNotify->FileNameLength / sizeof(WCHAR));
+
+                    // íŒŒì¼ í™•ìž¥ìž í™•ì¸ (.json íŒŒì¼ë§Œ ì²˜ë¦¬)
+                    CString strFileName(fileName);
+                    if (strFileName.Right(5).CompareNoCase(_T(".json")) == 0)
+                    {
+                        // ë³€ê²½ ìœ í˜•ì— ë”°ë¥¸ ì²˜ë¦¬
+                        if (pNotify->Action == FILE_ACTION_ADDED ||
+                            pNotify->Action == FILE_ACTION_MODIFIED)
+                        {
+                            // íŒŒì¼ ê²½ë¡œ ìƒì„±
+                            CString folderPath = CConfigManager::GetInstance().GetJsonFolderPath();
+                            if (folderPath.Right(1) != _T("\\"))
+                                folderPath += _T("\\");
+
+                            CString fullPath = folderPath + strFileName;
+
+                            // ìƒˆ íŒŒì¼ ë¡œë“œ
+                            CJsonFileManager::GetInstance().LoadJsonFile(fullPath);
+
+                            TRACE(_T("New file detected: %s\n"), fullPath);
+                        }
+                    }
+
+                    // ë‹¤ìŒ í•­ëª©ìœ¼ë¡œ ì´ë™
+                    if (pNotify->NextEntryOffset == 0)
+                        break;
+
+                    pNotify = (FILE_NOTIFY_INFORMATION*)((BYTE*)pNotify + pNotify->NextEntryOffset);
+                }
+            }
+
+            // ë‹¤ì‹œ ë³€ê²½ ê°ì‹œ ì„¤ì •
+            ResetEvent(m_overlapped.hEvent);
+            BOOL success = ReadDirectoryChangesW(
+                m_directoryHandle,
+                m_buffer,
+                sizeof(m_buffer),
+                FALSE,
+                FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
+                &m_bytesReturned,
+                &m_overlapped,
+                NULL);
+
+            if (!success)
+            {
+                TRACE(_T("Failed to restart ReadDirectoryChangesW: %d\n"), GetLastError());
+                StopDirectoryWatch();
+            }
+        }
+    }
+    else if (waitResult == WAIT_FAILED)
+    {
+        TRACE(_T("WaitForSingleObject failed: %d\n"), GetLastError());
+    }
+}
+
+// í†µê³„ ì—…ë°ì´íŠ¸ ë©”ì„œë“œ êµ¬í˜„
+void CThreadSub::UpdateStats(int parsedCount, int totalCount)
+{
+    m_nParsedCount = parsedCount;
+    m_nTotalCount = totalCount;
+
+    if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+    {
+        // UI ìŠ¤ë ˆë“œì— ë©”ì‹œì§€ ì „ì†¡
+        ::PostMessage(m_pOwner->GetSafeHwnd(), WM_USER + 100, parsedCount, totalCount);
+    }
 }
 
 int CThreadSub::Run()
 {
-	CEVMQTTApp* pApp = (CEVMQTTApp*)AfxGetApp();
+    // MQTT ì´ˆê¸°í™”
+    CEVMQTTApp* pApp = (CEVMQTTApp*)AfxGetApp();
+    DWORD dwCur = GetTickCount();
+    DWORD dwOld = dwCur;
+    DWORD dwLastParsing = dwCur;
+    int nErrorCode = 1;
+    int nNetworkLoop;
+    TRACE(">>>>Start Loop\n");
+    char* mqtt_host = strdup(m_szIP);
+    char* mqtt_topic = strdup(m_szTopic);
+    int mqtt_port = m_nPort;
+    int mqtt_keepalive = m_nKeepAlive;
+    int mdelay = 0;
+    bool clean_session = true;
+    struct mosquitto* mosq = NULL;
 
-	SYSTEMTIME tmOld, tmCur;
-	GetLocalTime(&tmOld);
-	tmCur = tmOld;
+    // íŒŒì‹± í†µê³„ ì´ˆê¸°í™”
+    m_nParsedCount = 0;
+    m_nTotalCount = 0;
 
-	DWORD dwCur = GetTickCount();
-	DWORD dwOld = dwCur;
-	DWORD dwLastParsing = dwCur;
+    mosquitto_lib_init();
+    mosq = mosquitto_new(NULL, clean_session, NULL);
+    if (!mosq)
+    {
+        TRACE("Could not create new mosquitto struct\n");
+        nErrorCode = -1;
+    }
+    mosquitto_connect_callback_set(mosq, connect_callback);
+    mosquitto_message_callback_set(mosq, message_callback);
+    if (mosquitto_connect(mosq, mqtt_host, mqtt_port, mqtt_keepalive))
+    {
+        TRACE("Unable to connect mosquitto.\n");
+        nErrorCode = -2;
+    }
+    mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
 
-	int nErrorCode = 1;
-	int nNetworkLoop;
+    // Settings load
+    CConfigManager& configManager = CConfigManager::GetInstance();
+    configManager.LoadConfig();
 
-	TRACE(">>>>Start Loop\n");
+    // JSON file manager
+    CJsonFileManager& fileManager = CJsonFileManager::GetInstance();
 
-	char* mqtt_host = strdup(m_szIP);
-	char* mqtt_topic = strdup(m_szTopic);
-	int mqtt_port = m_nPort;
-	int mqtt_keepalive = m_nKeepAlive;
+    // Result manager
+    CJsonResultManager& resultManager = CJsonResultManager::GetInstance();
 
-	int mdelay = 0;
-	bool clean_session = true;
+    // Variables for directory change detection
+    HANDLE hDirectory = INVALID_HANDLE_VALUE;
+    OVERLAPPED overlapped = { 0 };
+    char buffer[8192] = { 0 };  // Buffer to store change information
+    DWORD bytesReturned = 0;
 
-	struct mosquitto* mosq = NULL;
+    // Directory monitoring setup
+    CString folderPath = configManager.GetJsonFolderPath();
+    if (!folderPath.IsEmpty())
+    {
+        // Initial folder scan once
+        fileManager.ScanJsonFolder(folderPath, configManager.GetSortMethod());
 
-	mosquitto_lib_init();
-	mosq = mosquitto_new(NULL, clean_session, NULL);
-	if (!mosq)
-	{
-		TRACE("Could not create new mosquitto struct\n");
-		nErrorCode = -1;
-	}
+        // ì´ íŒŒì¼ ìˆ˜ ì—…ë°ì´íŠ¸
+        m_nTotalCount = fileManager.GetTotalJsonCount();
+        UpdateStats(m_nParsedCount, m_nTotalCount);
 
-	mosquitto_connect_callback_set(mosq, connect_callback);
-	mosquitto_message_callback_set(mosq, message_callback);
+        // Open directory handle
+        hDirectory = CreateFile(
+            folderPath,                           // Directory path to monitor
+            FILE_LIST_DIRECTORY,                  // Directory access rights
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, // Share mode
+            NULL,                                 // Security attributes
+            OPEN_EXISTING,                        // Open options
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, // File attributes
+            NULL);                                // Template file
 
-	if (mosquitto_connect(mosq, mqtt_host, mqtt_port, mqtt_keepalive))
-	{
-		TRACE("Unable to connect mosquitto.\n");
-		nErrorCode = -2;
-	}
+        if (hDirectory != INVALID_HANDLE_VALUE)
+        {
+            // Initialize OVERLAPPED structure
+            overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-	mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
+            // Start change monitoring
+            if (overlapped.hEvent)
+            {
+                BOOL result = ReadDirectoryChangesW(
+                    hDirectory,                    // Directory handle
+                    buffer,                        // Result buffer
+                    sizeof(buffer),                // Buffer size
+                    FALSE,                         // Include subdirectories
+                    FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE, // Change types to monitor
+                    &bytesReturned,                // Returned bytes
+                    &overlapped,                   // OVERLAPPED structure
+                    NULL);                         // Completion routine
 
-	// ¼³Á¤ ·Îµå
-	CConfigManager& configManager = CConfigManager::GetInstance();
-	configManager.LoadConfig();
+                if (!result && GetLastError() != ERROR_IO_PENDING)
+                {
+                    TRACE("ReadDirectoryChangesW failed: %d\n", GetLastError());
+                    CloseHandle(overlapped.hEvent);
+                    overlapped.hEvent = NULL;
+                    CloseHandle(hDirectory);
+                    hDirectory = INVALID_HANDLE_VALUE;
+                }
+                else
+                {
+                    TRACE("Started monitoring directory changes: %s\n", folderPath);
+                }
+            }
+            else
+            {
+                TRACE("Failed to create event: %d\n", GetLastError());
+                CloseHandle(hDirectory);
+                hDirectory = INVALID_HANDLE_VALUE;
+            }
+        }
+        else
+        {
+            TRACE("Failed to open directory handle: %d\n", GetLastError());
+        }
+    }
 
-	// JSON ÆÄÀÏ °ü¸®ÀÚ
-	CJsonFileManager& fileManager = CJsonFileManager::GetInstance();
+    while (!m_bEndThread)
+    {
+        Sleep(2);
+        dwCur = GetTickCount();
 
-	// °á°ú °ü¸®ÀÚ
-	CJsonResultManager& resultManager = CJsonResultManager::GetInstance();
+        // Directory change detection processing
+        if (hDirectory != INVALID_HANDLE_VALUE && overlapped.hEvent)
+        {
+            DWORD waitStatus = WaitForSingleObject(overlapped.hEvent, 0);
+            if (waitStatus == WAIT_OBJECT_0)
+            {
+                // Verify asynchronous I/O completion
+                DWORD bytesTransferred = 0;
+                if (GetOverlappedResult(hDirectory, &overlapped, &bytesTransferred, FALSE))
+                {
+                    if (bytesTransferred > 0)
+                    {
+                        // Process buffer
+                        FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION*)buffer;
+                        bool fileAdded = false;
 
-	// ÃÊ±â¿¡ ÇÑ ¹ø Æú´õ ½ºÄµ
-	if (!configManager.GetJsonFolderPath().IsEmpty()) {
-		fileManager.ScanJsonFolder(configManager.GetJsonFolderPath(), configManager.GetSortMethod());
-	}
+                        for (;;)
+                        {
+                            // Convert file name
+                            WCHAR fileName[MAX_PATH] = { 0 };
+                            wcsncpy_s(fileName, MAX_PATH, pNotify->FileName, pNotify->FileNameLength / sizeof(WCHAR));
 
-	while (!m_bEndThread)
-	{
-		Sleep(2);
+                            // Check file extension (.json files only)
+                            CString strFileName(fileName);
+                            if (strFileName.Right(5).CompareNoCase(_T(".json")) == 0)
+                            {
+                                // Process by change type
+                                if (pNotify->Action == FILE_ACTION_ADDED ||
+                                    pNotify->Action == FILE_ACTION_MODIFIED)
+                                {
+                                    // Create file path
+                                    CString fullPath = folderPath;
+                                    if (fullPath.Right(1) != _T("\\"))
+                                        fullPath += _T("\\");
 
-		dwCur = GetTickCount();
-		if (dwCur - dwOld >= 1000)
-		{
-			dwOld = dwCur;
-			GetLocalTime(&tmCur);
+                                    fullPath += strFileName;
 
-			if (tmOld.wMinute != tmCur.wMinute)
-			{
-				tmOld = tmCur;
+                                    // Load new file
+                                    if (fileManager.LoadJsonFile(fullPath))
+                                    {
+                                        if (pNotify->Action == FILE_ACTION_ADDED)
+                                        {
+                                            fileAdded = true;
+                                        }
+                                    }
 
-				// 1ºÐ¸¶´Ù JSON ÆÄÀÏ Æú´õ ´Ù½Ã ½ºÄµ
-				if (!configManager.GetJsonFolderPath().IsEmpty()) {
-					fileManager.ScanJsonFolder(configManager.GetJsonFolderPath(), configManager.GetSortMethod());
-				}
-			}
-		}
+                                    TRACE(_T("New file detected: %s\n"), fullPath);
+                                }
+                            }
 
-		// ÆÄ½Ì °£°Ý Ã¼Å© (±âº» 1ÃÊ)
-		int parsingInterval = configManager.GetParsingInterval();
-		if (dwCur - dwLastParsing >= static_cast<DWORD>(parsingInterval)) {
-			dwLastParsing = dwCur;
+                            // Move to next item
+                            if (pNotify->NextEntryOffset == 0)
+                                break;
 
-			// Ã³¸®ÇÒ ÆÄÀÏÀÌ ÀÖÀ¸¸é ÆÄ½Ì ½ÇÇà
-			if (fileManager.GetPendingCount() > 0) {
-				JsonFileData fileData = fileManager.GetNextPendingFile();
-				if (!fileData.filePath.IsEmpty()) {
-					try {
-						// JSON ÆÄ½Ì
-						CJsonParser jsonParser;
-						if (jsonParser.ParseMessage(fileData.content.c_str(), fileData.content.length())) {
-							// µð¹ö±× Ãâ·Â
-							jsonParser.TraceEventData();
+                            pNotify = (FILE_NOTIFY_INFORMATION*)((BYTE*)pNotify + pNotify->NextEntryOffset);
+                        }
 
-							// °á°ú ÀúÀå
-							resultManager.StoreResult(fileData.filePath, jsonParser.GetEventData());
+                        // íŒŒì¼ì´ ì¶”ê°€ë˜ì—ˆìœ¼ë©´ ì´ íŒŒì¼ ìˆ˜ ì—…ë°ì´íŠ¸
+                        if (fileAdded)
+                        {
+                            m_nTotalCount = fileManager.GetTotalJsonCount();
+                            UpdateStats(m_nParsedCount, m_nTotalCount);
+                        }
+                    }
 
-							// Ã³¸® ¿Ï·á Ç¥½Ã
-							fileManager.MarkFileAsProcessed(fileData.filePath);
+                    // Set change monitoring again
+                    ResetEvent(overlapped.hEvent);
+                    BOOL success = ReadDirectoryChangesW(
+                        hDirectory,
+                        buffer,
+                        sizeof(buffer),
+                        FALSE,
+                        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
+                        &bytesReturned,
+                        &overlapped,
+                        NULL);
 
-							OutputDebugString(_T("ÆÄÀÏ ÆÄ½Ì ¼º°ø: "));
-							OutputDebugString(fileData.filePath);
-							OutputDebugString(_T("\n"));
-						}
-					}
-					catch (const std::exception& e) {
-						OutputDebugString(_T("ÆÄ½Ì Áß ¿À·ù ¹ß»ý: "));
-						OutputDebugStringA(e.what());
-						OutputDebugString(_T("\n"));
-					}
-				}
-			}
-		}
+                    if (!success && GetLastError() != ERROR_IO_PENDING)
+                    {
+                        TRACE("Failed to restart ReadDirectoryChangesW: %d\n", GetLastError());
+                        CloseHandle(overlapped.hEvent);
+                        overlapped.hEvent = NULL;
+                        CloseHandle(hDirectory);
+                        hDirectory = INVALID_HANDLE_VALUE;
+                    }
+                }
+            }
+        }
 
-		nNetworkLoop = mosquitto_loop(mosq, -1, 1);
-		if (nNetworkLoop)
-		{
-			TRACE("mosquitto connection error!\n");
-			Sleep(1000);
-			mosquitto_reconnect(mosq);
+        // Parsing interval check (default 1 second)
+        int parsingInterval = configManager.GetParsingInterval();
+        if (dwCur - dwLastParsing >= static_cast<DWORD>(parsingInterval)) {
+            dwLastParsing = dwCur;
+            // Parse if there are files to process
+            if (fileManager.GetPendingCount() > 0) {
+                JsonFileData fileData = fileManager.GetNextPendingFile();
+                if (!fileData.filePath.IsEmpty()) {
+                    try {
+                        // JSON parsing
+                        CJsonParser jsonParser;
+                        if (jsonParser.ParseMessage(fileData.content.c_str(), fileData.content.length())) {
+                            // Debug output
+                            jsonParser.TraceEventData();
+                            // Save result
+                            resultManager.StoreResult(fileData.filePath, jsonParser.GetEventData());
+                            // Mark as processed
+                            fileManager.MarkFileAsProcessed(fileData.filePath);
+                            OutputDebugString(_T("File parsing successful: "));
+                            OutputDebugString(fileData.filePath);
+                            OutputDebugString(_T("\n"));
 
-			nErrorCode = -100;
-		}
-		else if (nErrorCode < 1)
-			nErrorCode = 1;
-	}
+                            // íŒŒì‹± ì„±ê³µ ì¹´ìš´íŠ¸ ì¦ê°€ ë° í†µê³„ ì—…ë°ì´íŠ¸
+                            m_nParsedCount++;
+                            UpdateStats(m_nParsedCount, m_nTotalCount);
+                        }
+                        else {
+                            // íŒŒì‹± ì‹¤íŒ¨í•´ë„ ì²˜ë¦¬ ì™„ë£Œë¡œ í‘œì‹œ
+                            fileManager.MarkFileAsProcessed(fileData.filePath);
+                            OutputDebugString(_T("File parsing failed: "));
+                            OutputDebugString(fileData.filePath);
+                            OutputDebugString(_T("\n"));
+                        }
+                    }
+                    catch (const std::exception& e) {
+                        // ì˜ˆì™¸ ë°œìƒí•´ë„ ì²˜ë¦¬ ì™„ë£Œë¡œ í‘œì‹œ
+                        fileManager.MarkFileAsProcessed(fileData.filePath);
+                        OutputDebugString(_T("Error during parsing: "));
+                        OutputDebugStringA(e.what());
+                        OutputDebugString(_T("\n"));
+                    }
+                }
+            }
+        }
 
-	mosquitto_destroy(mosq);
-	mosquitto_lib_cleanup();
-	free(mqtt_host);
-	free(mqtt_topic);
+        // MQTT loop processing
+        nNetworkLoop = mosquitto_loop(mosq, -1, 1);
+        if (nNetworkLoop)
+        {
+            TRACE("mosquitto connection error!\n");
+            Sleep(1000);
+            mosquitto_reconnect(mosq);
+            nErrorCode = -100;
+        }
+        else if (nErrorCode < 1)
+            nErrorCode = 1;
+    }
 
-	TRACE(">>>>End Loop\n");
+    // Cleanup: Stop directory monitoring
+    if (overlapped.hEvent)
+    {
+        CloseHandle(overlapped.hEvent);
+        overlapped.hEvent = NULL;
+    }
 
-	PostThreadMessage(WM_QUIT, 0, 0);
+    if (hDirectory != INVALID_HANDLE_VALUE)
+    {
+        CancelIo(hDirectory);
+        CloseHandle(hDirectory);
+        hDirectory = INVALID_HANDLE_VALUE;
+    }
 
-	return CWinThread::Run();
+    // MQTT cleanup
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
+    free(mqtt_host);
+    free(mqtt_topic);
+    TRACE(">>>>End Loop\n");
+    PostThreadMessage(WM_QUIT, 0, 0);
+    return CWinThread::Run();
 }

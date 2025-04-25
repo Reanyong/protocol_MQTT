@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "JsonFileManager.h"
 
 CJsonFileManager::CJsonFileManager()
@@ -18,41 +18,41 @@ CJsonFileManager& CJsonFileManager::GetInstance()
 bool CJsonFileManager::LoadJsonFile(const CString& filePath)
 {
     try {
-        // 파일 존재 여부 확인
+        // Check if file exists
         CFileStatus status;
         if (!CFile::GetStatus(filePath, status)) {
-            OutputDebugString(_T("파일이 존재하지 않습니다: "));
+            OutputDebugString(_T("File does not exist: "));
             OutputDebugString(filePath);
             OutputDebugString(_T("\n"));
             return false;
         }
 
-        // 파일 시간 확인
+        // Check file time
         time_t fileTime = GetFileModifiedTime(filePath);
 
-        // 이미 처리된 파일인지 확인
+        // Check if file has already been processed
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             auto it = m_jsonFiles.find(filePath);
             if (it != m_jsonFiles.end() && it->second.lastModified == fileTime && it->second.processed) {
-                // 이미 처리된 파일이고 변경되지 않았으면 건너뜀
+                // Skip if file has already been processed and hasn't changed
                 return true;
             }
         }
 
-        // 파일 열기
+        // Open file
         CFile file;
         if (!file.Open(filePath, CFile::modeRead | CFile::shareDenyWrite)) {
-            OutputDebugString(_T("파일을 열 수 없습니다: "));
+            OutputDebugString(_T("Cannot open file: "));
             OutputDebugString(filePath);
             OutputDebugString(_T("\n"));
             return false;
         }
 
-        // 파일 크기 확인 및 메모리 할당
+        // Check file size and allocate memory
         ULONGLONG fileSize = file.GetLength();
-        if (fileSize > 10 * 1024 * 1024) {  // 10MB 제한
-            OutputDebugString(_T("파일 크기가 너무 큽니다: "));
+        if (fileSize > 10 * 1024 * 1024) {  // 10MB limit
+            OutputDebugString(_T("File size is too large: "));
             OutputDebugString(filePath);
             OutputDebugString(_T("\n"));
             file.Close();
@@ -61,43 +61,43 @@ bool CJsonFileManager::LoadJsonFile(const CString& filePath)
 
         std::vector<char> buffer(static_cast<size_t>(fileSize) + 1, 0);
 
-        // 파일 읽기
+        // Read file
         file.Read(buffer.data(), static_cast<UINT>(fileSize));
         file.Close();
 
-        // JSON 구문 확인 (실제 파싱은 나중에 별도로 함)
+        // Verify JSON syntax (actual parsing will be done separately later)
         std::string content(buffer.data(), static_cast<size_t>(fileSize));
         try {
             auto json = nlohmann::json::parse(content);
 
-            // 파일 데이터 저장
+            // Store file data
             JsonFileData fileData;
             fileData.filePath = filePath;
             fileData.content = std::move(content);
             fileData.lastModified = fileTime;
             fileData.processed = false;
 
-            // 맵과 큐에 추가
+            // Add to map and queue
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 m_jsonFiles[filePath] = std::move(fileData);
                 m_pendingQueue.push_back(filePath);
             }
 
-            OutputDebugString(_T("파일 로드 성공: "));
+            OutputDebugString(_T("File loaded successfully: "));
             OutputDebugString(filePath);
             OutputDebugString(_T("\n"));
             return true;
         }
         catch (const nlohmann::json::parse_error& e) {
-            OutputDebugString(_T("JSON 파싱 오류: "));
+            OutputDebugString(_T("JSON parsing error: "));
             OutputDebugStringA(e.what());
             OutputDebugString(_T("\n"));
             return false;
         }
     }
     catch (const std::exception& e) {
-        OutputDebugString(_T("파일 로드 중 예외 발생: "));
+        OutputDebugString(_T("Exception occurred while loading file: "));
         OutputDebugStringA(e.what());
         OutputDebugString(_T("\n"));
         return false;
@@ -106,42 +106,42 @@ bool CJsonFileManager::LoadJsonFile(const CString& filePath)
 
 void CJsonFileManager::ScanJsonFolder(const CString& folderPath, FileSortMethod sortMethod)
 {
-    // 폴더가 비어있으면 처리하지 않음
+    // Skip processing if folder is empty
     if (folderPath.IsEmpty()) {
-        OutputDebugString(_T("폴더 경로가 지정되지 않았습니다.\n"));
+        OutputDebugString(_T("Folder path is not specified.\n"));
         return;
     }
 
-    // 폴더에서 JSON 파일 찾기
+    // Find JSON files in folder
     std::vector<FileInfo> files = FindJsonFilesInFolder(folderPath);
 
-    // 정렬 방식에 따라 파일 정렬
+    // Sort files according to sort method
     switch (sortMethod) {
     case FileSortMethod::BY_NAME:
         std::sort(files.begin(), files.end(), CompareByName);
-        OutputDebugString(_T("파일을 이름 순서로 정렬했습니다.\n"));
+        OutputDebugString(_T("Files sorted by name.\n"));
         break;
     case FileSortMethod::BY_CREATION:
         std::sort(files.begin(), files.end(), CompareByCreation);
-        OutputDebugString(_T("파일을 생성 시간 순서로 정렬했습니다.\n"));
+        OutputDebugString(_T("Files sorted by creation time.\n"));
         break;
     case FileSortMethod::BY_MODIFIED:
         std::sort(files.begin(), files.end(), CompareByModified);
-        OutputDebugString(_T("파일을 수정 시간 순서로 정렬했습니다.\n"));
+        OutputDebugString(_T("Files sorted by modification time.\n"));
         break;
     case FileSortMethod::NONE:
     default:
-        OutputDebugString(_T("파일을 정렬하지 않았습니다.\n"));
+        OutputDebugString(_T("Files not sorted.\n"));
         break;
     }
 
-    // 정렬된 파일 목록을 처리
+    // Process sorted file list
     for (const auto& fileInfo : files) {
         LoadJsonFile(fileInfo.filePath);
     }
 
     CString msg;
-    msg.Format(_T("총 %d개의 JSON 파일을 스캔했습니다.\n"), static_cast<int>(files.size()));
+    msg.Format(_T("Scanned a total of %d JSON files.\n"), static_cast<int>(files.size()));
     OutputDebugString(msg);
 }
 
@@ -155,7 +155,7 @@ JsonFileData CJsonFileManager::GetNextPendingFile()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_pendingQueue.empty()) {
-        return JsonFileData(); // 빈 데이터 반환
+        return JsonFileData(); // Return empty data
     }
 
     CString filePath = m_pendingQueue.front();
@@ -163,7 +163,7 @@ JsonFileData CJsonFileManager::GetNextPendingFile()
 
     auto it = m_jsonFiles.find(filePath);
     if (it != m_jsonFiles.end()) {
-        // 원본을 유지하기 위해 복사본 반환
+        // Return a copy to preserve the original
         return it->second;
     }
 
@@ -183,7 +183,7 @@ void CJsonFileManager::ClearProcessedFiles()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    // 처리완료된 파일만 제거
+    // Remove only processed files
     auto it = m_jsonFiles.begin();
     while (it != m_jsonFiles.end()) {
         if (it->second.processed) {
@@ -280,4 +280,10 @@ bool CJsonFileManager::CompareByCreation(const FileInfo& a, const FileInfo& b)
 bool CJsonFileManager::CompareByModified(const FileInfo& a, const FileInfo& b)
 {
     return a.modifiedTime < b.modifiedTime;
+}
+
+size_t CJsonFileManager::GetTotalJsonCount() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_jsonFiles.size();
 }

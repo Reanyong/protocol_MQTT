@@ -52,6 +52,7 @@ CEVMQTTDlg::CEVMQTTDlg(CWnd* pParent /*=nullptr*/)
 void CEVMQTTDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_STATIC_STATS, m_staticStats);
 }
 
 BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
@@ -61,6 +62,7 @@ BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_SUB, &CEVMQTTDlg::OnBnClickedBtnSub)
 	ON_BN_CLICKED(IDOK, &CEVMQTTDlg::OnBnClickedOk)
 	ON_BN_CLICKED(IDCANCEL, &CEVMQTTDlg::OnBnClickedCancel)
+	ON_MESSAGE(WM_USER + 100, OnUpdateStats)
 END_MESSAGE_MAP()
 
 
@@ -94,6 +96,10 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	//  프레임워크가 이 작업을 자동으로 수행합니다.
 	SetIcon(m_hIcon, TRUE);			// 큰 아이콘을 설정합니다.
 	SetIcon(m_hIcon, FALSE);		// 작은 아이콘을 설정합니다.
+
+	m_nParsedCount = 0;
+	m_nTotalCount = 0;
+	UpdateParsingStats(0, 0);
 
 	// TODO: 여기에 추가 초기화 작업을 추가합니다.
 
@@ -265,4 +271,24 @@ void CEVMQTTDlg::DeleteThreadSub()
 		}
 #endif
 	}
+}
+
+// 통계 업데이트 메서드 구현
+void CEVMQTTDlg::UpdateParsingStats(int parsedCount, int totalCount)
+{
+	m_nParsedCount = parsedCount;
+	m_nTotalCount = totalCount;
+
+	CString statsText;
+	statsText.Format(_T("json 파싱 결과: %d / %d"), m_nParsedCount, m_nTotalCount);
+	m_staticStats.SetWindowText(statsText);
+}
+
+// 메시지 핸들러 구현
+LRESULT CEVMQTTDlg::OnUpdateStats(WPARAM wParam, LPARAM lParam)
+{
+	int parsedCount = (int)wParam;
+	int totalCount = (int)lParam;
+	UpdateParsingStats(parsedCount, totalCount);
+	return 0;
 }
