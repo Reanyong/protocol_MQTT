@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "json.hpp"
 #include <string>
@@ -49,12 +49,28 @@ public:
         EventData() : cid(0) {}
     };
 
+    enum ParseStatus {
+        PARSE_SUCCESS,       // 정상 파싱 성공
+        PARSE_JSON_ERROR,    // JSON 파싱 오류
+        PARSE_SCHEMA_ERROR,  // 스키마 유효성 검사 오류
+        PARSE_TYPE_ERROR     // 타입 오류
+    };
+
+    ParseStatus GetParseStatus() const { return m_parseStatus; }
+    CString GetErrorMessage() const { return m_errorMessage; }
+
     // 파싱된 데이터 반환
     const EventData& GetEventData() const { return m_eventData; }
 
     // 디버그를 위한 파싱 결과 출력
     void TraceEventData();
 
+    bool IsValid() const { return m_isValid; }
+
 private:
     EventData m_eventData;
+    bool m_isValid;             // 유효성 검사 결과
+
+    ParseStatus m_parseStatus;  // 파싱 상태
+    CString m_errorMessage;     // 오류 메세지
 };

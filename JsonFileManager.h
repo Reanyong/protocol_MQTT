@@ -49,6 +49,24 @@ public:
     // total json file convert
     size_t GetTotalJsonCount() const;
 
+    struct FileProcessResult
+    {
+        CString filePath;      // 파일 경로
+        bool hasError;         // 오류 포함 여부
+        CString errorMessage;  // 오류 메시지
+
+        FileProcessResult() : hasError(false) {}
+    };
+
+    void AddProcessResult(const CString& filePath, bool hasError, const CString& errorMessage);
+    bool GetFileProcessResult(const CString& filePath, FileProcessResult& result) const;
+
+    // 오류가 있는 파일만 가져오는 메소드
+    std::vector<FileProcessResult> GetErrorFiles() const;
+
+    // 파일 처리 결과 초기화
+    void ClearProcessResults();
+
 private:
     std::map<CString, JsonFileData> m_jsonFiles;     // 파일 데이터 맵 (키: 파일경로)
     std::deque<CString> m_pendingQueue;              // 처리 대기 큐
@@ -65,4 +83,6 @@ private:
 
     // 폴더에서 JSON 파일 찾기
     std::vector<FileInfo> FindJsonFilesInFolder(const CString& folderPath);
+
+    std::map<CString, FileProcessResult> m_processResults;
 };

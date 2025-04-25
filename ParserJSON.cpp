@@ -1,5 +1,6 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "ParserJSON.h"
+#include "ErrorMessages.h"
 
 CJsonParser::CJsonParser()
 {
@@ -16,80 +17,232 @@ bool CJsonParser::ParseMessage(const char* payload, int length)
         std::string jsonStr(payload, length);
         nlohmann::json jsonData = nlohmann::json::parse(jsonStr);
 
-        // 기본 필드 파싱
-        if (jsonData.contains("code")) {
+        m_parseStatus = PARSE_SUCCESS;  // 초기값은 성공으로 설정
+        m_errorMessage = _T("");
+
+        // 스키마 검증
+        bool hasRequiredFields = true;
+
+        // code 필드 검증
+        if (!jsonData.contains("code")) {
+            hasRequiredFields = false;
+            m_parseStatus = PARSE_SCHEMA_ERROR;
+            m_errorMessage = _T("필수 필드 'code'가 없습니다");
+        }
+        else {
             m_eventData.code = jsonData["code"];
         }
 
-        if (jsonData.contains("cid")) {
-            m_eventData.cid = jsonData["cid"];
+        // cid 필드 검증
+        if (!jsonData.contains("cid")) {
+            hasRequiredFields = false;
+            m_parseStatus = PARSE_SCHEMA_ERROR;
+            m_errorMessage = _T("필수 필드 'cid'가 없습니다");
+        }
+        else {
+            // cid가 숫자인지 확인하고 처리
+            if (jsonData["cid"].is_number()) {
+                m_eventData.cid = jsonData["cid"];
+            }
+            else if (jsonData["cid"].is_string()) {
+                // 문자열을 숫자로 변환 시도
+                try {
+                    m_eventData.cid = std::stoi(jsonData["cid"].get<std::string>());
+                    m_parseStatus = PARSE_TYPE_ERROR;
+                    m_errorMessage = _T("'cid' 필드가 문자열입니다. 숫자 형식이어야 합니다");
+                }
+                catch (const std::exception& e) {
+                    m_eventData.cid = 0;
+                    m_parseStatus = PARSE_TYPE_ERROR;
+                    m_errorMessage = _T("'cid' 필드 변환 오류: 유효한 숫자가 아닙니다");
+                }
+            }
+            else {
+                m_eventData.cid = 0;
+                m_parseStatus = PARSE_TYPE_ERROR;
+                m_errorMessage = _T("'cid' 필드 타입 오류: 숫자 또는 숫자 문자열이어야 합니다");
+            }
         }
 
-        if (jsonData.contains("adr")) {
+        // adr 필드 검증
+        if (!jsonData.contains("adr")) {
+            hasRequiredFields = false;
+            m_parseStatus = PARSE_SCHEMA_ERROR;
+            m_errorMessage = _T("필수 필드 'adr'이 없습니다");
+        }
+        else {
             m_eventData.adr = jsonData["adr"];
         }
 
-        // "data" 객체 파싱
-        if (jsonData.contains("data") && jsonData["data"].is_object()) {
+        // data 객체 검증
+        if (!jsonData.contains("data")) {
+            hasRequiredFields = false;
+            m_parseStatus = PARSE_SCHEMA_ERROR;
+            m_errorMessage = _T("필수 필드 'data'가 없습니다");
+        }
+        else if (!jsonData["data"].is_object()) {
+            m_parseStatus = PARSE_TYPE_ERROR;
+            m_errorMessage = _T("'data' 필드가 객체 형식이 아닙니다");
+        }
+        else {
             const auto& data = jsonData["data"];
 
-            // eventno 처리
-            if (data.contains("eventno")) {
+            // eventno 필드 검증
+            if (!data.contains("eventno")) {
+                m_parseStatus = PARSE_SCHEMA_ERROR;
+                m_errorMessage = _T("'data.eventno' 필드가 없습니다");
+            }
+            else {
                 m_eventData.eventNo = data["eventno"];
             }
 
-            // srcurl 처리
-            if (data.contains("srcurl")) {
+            // srcurl 필드 검증
+            if (!data.contains("srcurl")) {
+                m_parseStatus = PARSE_SCHEMA_ERROR;
+                m_errorMessage = _T("'data.srcurl' 필드가 없습니다");
+            }
+            else {
                 m_eventData.srcUrl = data["srcurl"];
             }
 
-            // payload 처리
-            if (data.contains("payload") && data["payload"].is_object()) {
-                const auto& payload = data["payload"];
-
-                // 타이머 카운터 값 처리
-                if (payload.contains("/timer[1]/counter") && payload["/timer[1]/counter"].is_object()) {
-                    const auto& timer = payload["/timer[1]/counter"];
-                    if (timer.contains("code") && timer.contains("data")) {
-                        m_eventData.timerCounter.code = timer["code"];
-                        m_eventData.timerCounter.data = timer["data"];
-                        m_eventData.timerCounter.valid = true;
-                    }
+            // payload 필드 처리 (선택 사항)
+            if (data.contains("payload")) {
+                if (!data["payload"].is_object()) {
+                    m_parseStatus = PARSE_TYPE_ERROR;
+                    m_errorMessage = _T("'data.payload' 필드가 객체 형식이 아닙니다");
                 }
+                else {
+                    const auto& payload = data["payload"];
 
-                // 온도 데이터 처리
-                if (payload.contains("/processdatamaster/temperature") &&
-                    payload["/processdatamaster/temperature"].is_object()) {
-                    const auto& temp = payload["/processdatamaster/temperature"];
-                    if (temp.contains("code") && temp.contains("data")) {
-                        m_eventData.temperature.code = temp["code"];
-                        m_eventData.temperature.data = temp["data"];
-                        m_eventData.temperature.valid = true;
+                    // 타이머 카운터 값 처리
+                    if (payload.contains("/timer[1]/counter")) {
+                        const auto& timer = payload["/timer[1]/counter"];
+                        if (!timer.is_object()) {
+                            m_parseStatus = PARSE_TYPE_ERROR;
+                            m_errorMessage = _T("'/timer[1]/counter' 필드가 객체 형식이 아닙니다");
+                        }
+                        else {
+                            bool hasCode = timer.contains("code");
+                            bool hasData = timer.contains("data");
+
+                            if (!hasCode || !hasData) {
+                                m_parseStatus = PARSE_SCHEMA_ERROR;
+                                m_errorMessage = _T("타이머 카운터에 필수 필드가 없습니다");
+                            }
+                            else if (!timer["code"].is_number() || !timer["data"].is_number()) {
+                                m_parseStatus = PARSE_TYPE_ERROR;
+                                m_errorMessage = _T("타이머 카운터 필드가 숫자 형식이 아닙니다");
+                            }
+                            else {
+                                m_eventData.timerCounter.code = timer["code"];
+                                m_eventData.timerCounter.data = timer["data"];
+                                m_eventData.timerCounter.valid = true;
+                            }
+                        }
                     }
-                }
 
-                // IOLink 데이터 처리
-                if (payload.contains("/iolinkmaster/port[2]/iolinkdevice/pdin") &&
-                    payload["/iolinkmaster/port[2]/iolinkdevice/pdin"].is_object()) {
-                    const auto& iolink = payload["/iolinkmaster/port[2]/iolinkdevice/pdin"];
-                    if (iolink.contains("code") && iolink.contains("data")) {
-                        m_eventData.iolinkDevice.code = iolink["code"];
-                        m_eventData.iolinkDevice.data = iolink["data"];
-                        m_eventData.iolinkDevice.valid = true;
+                    // 온도 데이터 처리
+                    if (payload.contains("/processdatamaster/temperature")) {
+                        const auto& temp = payload["/processdatamaster/temperature"];
+                        if (!temp.is_object()) {
+                            m_parseStatus = PARSE_TYPE_ERROR;
+                            m_errorMessage = _T("'/processdatamaster/temperature' 필드가 객체 형식이 아닙니다");
+                        }
+                        else {
+                            bool hasCode = temp.contains("code");
+                            bool hasData = temp.contains("data");
+
+                            if (!hasCode || !hasData) {
+                                m_parseStatus = PARSE_SCHEMA_ERROR;
+                                m_errorMessage = _T("온도 데이터에 필수 필드가 없습니다");
+                            }
+                            else if (!temp["code"].is_number() || !temp["data"].is_number()) {
+                                m_parseStatus = PARSE_TYPE_ERROR;
+                                m_errorMessage = _T("온도 데이터 필드가 숫자 형식이 아닙니다");
+                            }
+                            else {
+                                m_eventData.temperature.code = temp["code"];
+                                m_eventData.temperature.data = temp["data"];
+                                m_eventData.temperature.valid = true;
+                            }
+                        }
+                    }
+
+                    // IOLink 데이터 처리
+                    if (payload.contains("/iolinkmaster/port[2]/iolinkdevice/pdin")) {
+                        const auto& iolink = payload["/iolinkmaster/port[2]/iolinkdevice/pdin"];
+                        if (!iolink.is_object()) {
+                            m_parseStatus = PARSE_TYPE_ERROR;
+                            m_errorMessage = _T("'/iolinkmaster/port[2]/iolinkdevice/pdin' 필드가 객체 형식이 아닙니다");
+                        }
+                        else {
+                            bool hasCode = iolink.contains("code");
+                            bool hasData = iolink.contains("data");
+
+                            if (!hasCode || !hasData) {
+                                m_parseStatus = PARSE_SCHEMA_ERROR;
+                                m_errorMessage = _T("IOLink 데이터에 필수 필드가 없습니다");
+                            }
+                            else {
+                                try {
+                                    // code 필드 처리
+                                    if (iolink["code"].is_number()) {
+                                        m_eventData.iolinkDevice.code = iolink["code"];
+                                    }
+                                    else {
+                                        m_parseStatus = PARSE_TYPE_ERROR;
+                                        m_errorMessage = _T("IOLink 'code' 필드가 숫자 형식이 아닙니다");
+                                        m_eventData.iolinkDevice.code = 0;
+                                    }
+
+                                    // data 필드 처리
+                                    if (iolink["data"].is_string()) {
+                                        m_eventData.iolinkDevice.data = iolink["data"];
+                                    }
+                                    else if (iolink["data"].is_number()) {
+                                        m_eventData.iolinkDevice.data = std::to_string(iolink["data"].get<int>());
+                                    }
+                                    else {
+                                        m_parseStatus = PARSE_TYPE_ERROR;
+                                        m_errorMessage = _T("IOLink 'data' 필드가 문자열이나 숫자 형식이 아닙니다");
+                                        m_eventData.iolinkDevice.data = "unknown";
+                                    }
+
+                                    m_eventData.iolinkDevice.valid = true;
+                                }
+                                catch (const std::exception& e) {
+                                    m_parseStatus = PARSE_TYPE_ERROR;
+                                    m_errorMessage.Format(_T("IOLink 처리 오류: %hs"), e.what());
+                                    m_eventData.iolinkDevice.valid = false;
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
+        // 파싱 결과 반환 (스키마 오류나 타입 오류가 있어도 기본 파싱은 성공한 것으로 간주)
         return true;
     }
     catch (const nlohmann::json::parse_error& e) {
-        // 파싱 오류 처리
+        // JSON 파싱 오류
+        m_parseStatus = PARSE_JSON_ERROR;
+        m_errorMessage.Format(_T("JSON 파싱 오류: %hs"), e.what());
         TRACE("JSON 파싱 오류: %s\n", e.what());
         return false;
     }
+    catch (const nlohmann::json::type_error& e) {
+        // JSON 타입 오류
+        m_parseStatus = PARSE_TYPE_ERROR;
+        m_errorMessage.Format(_T("JSON 타입 오류: %hs"), e.what());
+        TRACE("JSON 타입 오류: %s\n", e.what());
+        return false;
+    }
     catch (const std::exception& e) {
-        // 기타 예외 처리
+        // 기타 예외
+        m_parseStatus = PARSE_JSON_ERROR;
+        m_errorMessage.Format(_T("예외 발생: %hs"), e.what());
         TRACE("예외 발생: %s\n", e.what());
         return false;
     }

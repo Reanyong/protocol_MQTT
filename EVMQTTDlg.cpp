@@ -47,6 +47,11 @@ CEVMQTTDlg::CEVMQTTDlg(CWnd* pParent /*=nullptr*/)
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 
 	m_pThreadSub = NULL;
+
+	m_showInfoLogs = false;
+	m_showSuccessLogs = false;
+	m_showWarningLogs = true;
+	m_showErrorLogs = true;
 }
 
 void CEVMQTTDlg::DoDataExchange(CDataExchange* pDX)
@@ -104,7 +109,11 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	m_nTotalCount = 0;
 	UpdateParsingStats(0, 0);
 
+	SetDebugLogFilter(false, false, true, true);
+
 	InitDebugList();
+
+	AddDebugLog(_T("프로그램 시작"), _T(""), DebugLogItem::LOG_INFO);
 
 	// TODO: 여기에 추가 초기화 작업을 추가합니다.
 
@@ -213,9 +222,19 @@ void CEVMQTTDlg::BeginThreadSub()
 {
 	if (m_pThreadSub == NULL)
 	{
-		m_pThreadSub = (CThreadSub*)AfxBeginThread(RUNTIME_CLASS(CThreadSub), THREAD_PRIORITY_HIGHEST, 0, CREATE_SUSPENDED);
+		// 스레드 생성
+		m_pThreadSub = (CThreadSub*)AfxBeginThread(RUNTIME_CLASS(CThreadSub),
+			THREAD_PRIORITY_HIGHEST, 0, CREATE_SUSPENDED);
 		m_pThreadSub->m_pOwner = this;
+
+		// 스레드 시작 전 초기화 작업 실행
+		m_pThreadSub->InitializeFileProcessing();
+
+		// 스레드 시작
 		m_pThreadSub->ResumeThread();
+
+		// 로그 추가
+		AddDebugLog(_T("통신 시작"), _T(""), DebugLogItem::LOG_INFO);
 	}
 }
 
@@ -227,8 +246,12 @@ void CEVMQTTDlg::StopThreadSub()
 		try
 		{
 #endif
+			// 종료 메시지 전송
 			PostThreadMessage(m_pThreadSub->m_nThreadID, WM_QUIT, 0, 0);
 			m_pThreadSub->Stop();
+
+			// 로그 추가
+			AddDebugLog(_T("통신 종료"), _T(""), DebugLogItem::LOG_INFO);
 #ifndef _DEBUG
 		}
 		catch (...)
@@ -325,7 +348,13 @@ LRESULT CEVMQTTDlg::OnUpdateStats(WPARAM wParam, LPARAM lParam)
 // 디버그 리스트 초기화
 void CEVMQTTDlg::InitDebugList()
 {
-	// 리스트 컨트롤 스타일 설정
+	if (!::IsWindow(m_listDebug.GetSafeHwnd())) {
+		TRACE("리스트 컨트롤이 유효하지 않습니다.\n");
+		return;
+	}
+
+	while (m_listDebug.DeleteColumn(0));
+
 	DWORD dwStyle = m_listDebug.GetExtendedStyle();
 	m_listDebug.SetExtendedStyle(dwStyle | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
 
@@ -334,19 +363,47 @@ void CEVMQTTDlg::InitDebugList()
 	m_listDebug.InsertColumn(1, _T("상태"), LVCFMT_CENTER, 60);
 	m_listDebug.InsertColumn(2, _T("시간"), LVCFMT_LEFT, 70);
 	m_listDebug.InsertColumn(3, _T("메시지"), LVCFMT_LEFT, 300);
+
+	OutputDebugString(_T("디버그 리스트 초기화 완료\n"));
 }
 
 // 디버그 로그 추가
 void CEVMQTTDlg::AddDebugLog(const CString& message, const CString& filePath, DebugLogItem::LogType type)
 {
-	//std::lock_guard<std::mutex> lock(m_logMutex);
+	// 현재 필터 설정에 따라 표시 여부 결정
+	bool shouldDisplay = false;
+	switch (type) {
+	case DebugLogItem::LOG_INFO:
+		shouldDisplay = m_showInfoLogs;
+		break;
+	case DebugLogItem::LOG_SUCCESS:
+		shouldDisplay = m_showSuccessLogs;
+		break;
+	case DebugLogItem::LOG_WARNING:
+		shouldDisplay = m_showWarningLogs;
+		break;
+	case DebugLogItem::LOG_ERROR:
+		shouldDisplay = m_showErrorLogs;
+		break;
+	}
+
+	// 표시하지 않을 로그는 저장하지 않음
+	if (!shouldDisplay) {
+		return;
+	}
+
 	CSingleLock lock(&m_logMutex, TRUE);
+	if (!lock.IsLocked()) {
+		OutputDebugString(_T("로그 추가 중 뮤텍스 잠금 실패\n"));
+		return;
+	}
 
 	DebugLogItem logItem;
 	logItem.message = message;
 	logItem.filePath = filePath;
 	logItem.type = type;
 	logItem.timestamp = CTime::GetCurrentTime();
+	logItem.shouldDisplay = shouldDisplay;
 
 	m_debugLogs.push_back(logItem);
 
@@ -361,22 +418,32 @@ void CEVMQTTDlg::AddDebugLog(const CString& message, const CString& filePath, De
 // 디버그 리스트 업데이트
 void CEVMQTTDlg::UpdateDebugList()
 {
-	//std::lock_guard<CCriticalSection> lock(m_logMutex); // CCriticalSection 사용
+	if (!::IsWindow(m_listDebug.GetSafeHwnd())) {
+		TRACE("리스트 컨트롤이 유효하지 않습니다.\n");
+		return;
+	}
+
 	CSingleLock lock(&m_logMutex, TRUE);
+	if (!lock.IsLocked()) {
+		TRACE("뮤텍스 잠금 실패\n");
+		return;
+	}
 
-	// 현재 표시된 아이템 수
-	int currentCount = m_listDebug.GetItemCount();
-	int logCount = (int)m_debugLogs.size();
+	m_listDebug.DeleteAllItems();
 
-	// 새로운 로그만 추가 (성능 최적화)
-	for (int i = currentCount; i < logCount; i++)
-	{
+	// 필터링된 로그만 표시
+	int itemCount = 0;
+	for (size_t i = 0; i < m_debugLogs.size(); i++) {
 		const DebugLogItem& logItem = m_debugLogs[i];
+
+		// 표시 설정된 항목만 추가
+		if (!logItem.shouldDisplay) {
+			continue;
+		}
 
 		// 파일명 추출 (경로에서)
 		CString fileName = logItem.filePath;
-		if (!fileName.IsEmpty())
-		{
+		if (!fileName.IsEmpty()) {
 			int pos = fileName.ReverseFind('\\');
 			if (pos >= 0)
 				fileName = fileName.Mid(pos + 1);
@@ -386,8 +453,7 @@ void CEVMQTTDlg::UpdateDebugList()
 		CString strStatus;
 		COLORREF textColor = RGB(0, 0, 0);
 
-		switch (logItem.type)
-		{
+		switch (logItem.type) {
 		case DebugLogItem::LOG_INFO:
 			strStatus = _T("정보");
 			textColor = RGB(0, 0, 0); // 검은색
@@ -409,15 +475,21 @@ void CEVMQTTDlg::UpdateDebugList()
 		// 시간 포맷팅
 		CString strTime = logItem.timestamp.Format(_T("%H:%M:%S"));
 
-		// 컬럼 순서에 맞게 항목 추가: 파일명, 상태, 시간, 메시지
-		int nItem = m_listDebug.InsertItem(currentCount + i, fileName); // 파일명
-		m_listDebug.SetItemText(nItem, 1, strStatus); // 상태
-		m_listDebug.SetItemText(nItem, 2, strTime); // 시간
-		m_listDebug.SetItemText(nItem, 3, logItem.message); // 메시지
+		// 항목 추가
+		int nItem = m_listDebug.InsertItem(itemCount++, fileName);
+		if (nItem >= 0) {
+			m_listDebug.SetItemText(nItem, 1, strStatus);
+			m_listDebug.SetItemText(nItem, 2, strTime);
+			m_listDebug.SetItemText(nItem, 3, logItem.message);
 
-		// 맨 아래로 스크롤
-		m_listDebug.EnsureVisible(nItem, FALSE);
+			// 맨 아래로 스크롤
+			m_listDebug.EnsureVisible(nItem, FALSE);
+		}
 	}
+
+	// 화면 갱신 요청
+	m_listDebug.Invalidate();
+	m_listDebug.UpdateWindow();
 }
 
 // 로그 지우기 버튼 핸들러
@@ -433,6 +505,28 @@ void CEVMQTTDlg::OnBnClickedButtonClearLog()
 // 디버그 로그 업데이트 메시지 핸들러
 LRESULT CEVMQTTDlg::OnUpdateDebugLog(WPARAM wParam, LPARAM lParam)
 {
+	static int callCount = 0;
+	callCount++;
+
+	CString dbgMsg;
+	dbgMsg.Format(_T("OnUpdateDebugLog 호출 횟수: %d\n"), callCount);
+	OutputDebugString(dbgMsg);
+
 	UpdateDebugList();
 	return 0;
+}
+
+// 디버그 로그 필터 설정 메소드
+void CEVMQTTDlg::SetDebugLogFilter(bool showInfo, bool showSuccess, bool showWarning, bool showError)
+{
+	CSingleLock lock(&m_logMutex, TRUE);
+	if (lock.IsLocked()) {
+		m_showInfoLogs = showInfo;
+		m_showSuccessLogs = showSuccess;
+		m_showWarningLogs = showWarning;
+		m_showErrorLogs = showError;
+
+		// 필터 변경 시 리스트 업데이트
+		PostMessage(WM_USER + 101, 0, 0);
+	}
 }

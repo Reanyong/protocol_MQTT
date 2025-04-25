@@ -296,3 +296,51 @@ size_t CJsonFileManager::GetTotalJsonCount() const
 
     return m_jsonFiles.size();
 }
+
+void CJsonFileManager::AddProcessResult(const CString& filePath, bool hasError, const CString& errorMessage)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    FileProcessResult result;
+    result.filePath = filePath;
+    result.hasError = hasError;
+    result.errorMessage = errorMessage;
+
+    m_processResults[filePath] = result;
+}
+
+// 파일 처리 결과 조회
+bool CJsonFileManager::GetFileProcessResult(const CString& filePath, FileProcessResult& result) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    auto it = m_processResults.find(filePath);
+    if (it != m_processResults.end()) {
+        result = it->second;
+        return true;
+    }
+
+    return false;
+}
+
+// 오류가 있는 파일만 가져오기
+std::vector<CJsonFileManager::FileProcessResult> CJsonFileManager::GetErrorFiles() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    std::vector<FileProcessResult> errorFiles;
+    for (const auto& pair : m_processResults) {
+        if (pair.second.hasError) {
+            errorFiles.push_back(pair.second);
+        }
+    }
+
+    return errorFiles;
+}
+
+// 파일 처리 결과 초기화
+void CJsonFileManager::ClearProcessResults()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_processResults.clear();
+}

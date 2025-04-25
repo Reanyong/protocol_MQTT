@@ -17,7 +17,9 @@ struct DebugLogItem
 	LogType type;         // 로그 유형
 	CTime timestamp;      // 로그 시간
 
-	DebugLogItem() : type(LOG_INFO) {}
+	bool shouldDisplay;   // 표시 여부 플래그
+
+	DebugLogItem() : type(LOG_INFO), shouldDisplay(true) {}
 };
 
 class CEVMQTTDlg : public CDialogEx
@@ -41,6 +43,7 @@ public:
 	void		StopThreadSub();
 	void		DeleteThreadSub();
 
+	void SetDebugLogFilter(bool showInfo, bool showSuccess, bool showWarning, bool showError);
 
 // 구현입니다.
 protected:
@@ -82,4 +85,9 @@ private:
 	std::vector<DebugLogItem> m_debugLogs;
 	//mutable std::mutex m_logMutex;
 	CCriticalSection m_logMutex;
+
+	bool m_showInfoLogs;      // 정보 로그 표시 여부
+	bool m_showSuccessLogs;   // 성공 로그 표시 여부
+	bool m_showWarningLogs;   // 경고 로그 표시 여부
+	bool m_showErrorLogs;     // 오류 로그 표시 여부
 };

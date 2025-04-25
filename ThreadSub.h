@@ -48,6 +48,8 @@ public:
 	// 파싱 통계 함수
 	void UpdateStats(int parsedCount, int totalCount);
 
+	void InitializeFileProcessing();
+
 private:
 	HANDLE m_hChangeNotification;    // 디렉토리 변경 알림 핸들
 	OVERLAPPED m_overlapped;         // 비동기 I/O용 OVERLAPPED 구조체
@@ -59,6 +61,8 @@ private:
 	// 파싱 통계 변수
 	int m_nParsedCount;   // 파싱 성공 파일 수
 	int m_nTotalCount;    // 총 JSON 파일 수
+
+	bool IsValidJsonFile(const CString& filePath);
 
 public:
 	bool StartDirectoryWatch(const CString& folderPath);

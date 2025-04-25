@@ -305,6 +305,77 @@ void CThreadSub::UpdateStats(int parsedCount, int totalCount)
     }
 }
 
+void CThreadSub::InitializeFileProcessing()
+{
+    // 기존 처리 결과 초기화
+    CJsonFileManager::GetInstance().ClearProcessedFiles();
+
+    // 디렉토리 다시 스캔
+    CString folderPath = CConfigManager::GetInstance().GetJsonFolderPath();
+    if (!folderPath.IsEmpty()) {
+        CJsonFileManager::GetInstance().ScanJsonFolder(folderPath,
+            CConfigManager::GetInstance().GetSortMethod());
+    }
+}
+
+bool CThreadSub::IsValidJsonFile(const CString& filePath)
+{
+    // 파일 존재 확인
+    CFileStatus status;
+    if (!CFile::GetStatus(filePath, status)) {
+        return false;
+    }
+
+    // 파일 크기 확인 (최소 2바이트: {})
+    if (status.m_size < 2) {
+        return false;
+    }
+
+    // 파일 읽기 시도
+    try {
+        CFile file;
+        if (!file.Open(filePath, CFile::modeRead | CFile::shareDenyWrite)) {
+            return false;
+        }
+
+        // 처음 몇 바이트와 마지막 몇 바이트 읽어서 기본 구조 확인
+        const int checkSize = 10;
+        char startBuffer[checkSize + 1] = { 0 };
+        char endBuffer[checkSize + 1] = { 0 };
+
+        // 파일 시작 읽기
+        if (file.GetLength() >= checkSize) {
+            file.Read(startBuffer, checkSize);
+            startBuffer[checkSize] = '\0';
+        }
+        else {
+            file.Read(startBuffer, (UINT)file.GetLength());
+        }
+
+        // 파일 끝 읽기
+        if (file.GetLength() >= checkSize) {
+            file.Seek(-checkSize, CFile::end);
+            file.Read(endBuffer, checkSize);
+            endBuffer[checkSize] = '\0';
+        }
+
+        file.Close();
+
+        // 기본 JSON 구조 확인 (시작은 {, 끝은 })
+        bool startsWithBrace = (strchr(startBuffer, '{') != nullptr);
+        bool endsWithBrace = (strchr(endBuffer, '}') != nullptr);
+
+        return startsWithBrace && endsWithBrace;
+    }
+    catch (CFileException* e) {
+        e->Delete();
+        return false;
+    }
+    catch (...) {
+        return false;
+    }
+}
+
 int CThreadSub::Run()
 {
     // MQTT 초기화
@@ -527,37 +598,66 @@ int CThreadSub::Run()
                 JsonFileData fileData = fileManager.GetNextPendingFile();
                 if (!fileData.filePath.IsEmpty()) {
                     try {
-                        // JSON parsing
+                        // JSON 파싱
                         CJsonParser jsonParser;
-                        if (jsonParser.ParseMessage(fileData.content.c_str(), fileData.content.length())) {
-                            // Debug output
-                            jsonParser.TraceEventData();
-                            // Save result
-                            resultManager.StoreResult(fileData.filePath, jsonParser.GetEventData());
-                            // Mark as processed
-                            fileManager.MarkFileAsProcessed(fileData.filePath);
-                            OutputDebugString(_T("File parsing successful: "));
-                            OutputDebugString(fileData.filePath);
-                            OutputDebugString(_T("\n"));
+                        bool parsed = jsonParser.ParseMessage(fileData.content.c_str(), fileData.content.length());
 
-                            // 파싱 성공 카운트 증가 및 통계 업데이트
-                            m_nParsedCount++;
-                            UpdateStats(m_nParsedCount, m_nTotalCount);
+                        // 파서에서 얻은 결과로 오류 여부 확인
+                        bool hasError = false;
+                        CString errorMessage;
+
+                        if (!parsed) {
+                            // 기본 파싱 실패 (JSON 형식 오류)
+                            hasError = true;
+                            errorMessage = _T("JSON 파싱 오류");
                         }
-                        else {
-                            // 파싱 실패해도 처리 완료로 표시
-                            fileManager.MarkFileAsProcessed(fileData.filePath);
-                            OutputDebugString(_T("File parsing failed: "));
-                            OutputDebugString(fileData.filePath);
-                            OutputDebugString(_T("\n"));
+                        else if (jsonParser.GetParseStatus() != CJsonParser::PARSE_SUCCESS) {
+                            // 기본 파싱은 성공했지만 데이터 검증 오류 발생
+                            hasError = true;
+                            errorMessage = jsonParser.GetErrorMessage();
                         }
+
+                        // 파일 처리 결과 저장
+                        fileManager.AddProcessResult(fileData.filePath, hasError, errorMessage);
+
+                        // 처리 완료로 표시
+                        fileManager.MarkFileAsProcessed(fileData.filePath);
+
+                        // 오류가 있는 경우에만 디버그 리스트에 추가
+                        if (hasError && m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd())) {
+                            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+
+                            // 오류 유형에 따라 로그 타입 설정
+                            DebugLogItem::LogType logType = DebugLogItem::LOG_ERROR;
+                            if (jsonParser.GetParseStatus() == CJsonParser::PARSE_TYPE_ERROR) {
+                                logType = DebugLogItem::LOG_WARNING;  // 타입 오류는 경고로 표시
+                            }
+
+                            // 디버그 로그 추가
+                            pDlg->AddDebugLog(errorMessage, fileData.filePath, logType);
+                        }
+
+                        // 파싱 통계 업데이트
+                        m_nParsedCount++;
+                        UpdateStats(m_nParsedCount, m_nTotalCount);
+
                     }
                     catch (const std::exception& e) {
-                        // 예외 발생해도 처리 완료로 표시
+                        // 예외 발생 시
                         fileManager.MarkFileAsProcessed(fileData.filePath);
-                        OutputDebugString(_T("Error during parsing: "));
-                        OutputDebugStringA(e.what());
-                        OutputDebugString(_T("\n"));
+
+                        // 오류 로그 추가
+                        if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd())) {
+                            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                            CString errorMsg;
+                            errorMsg.Format(_T("처리 중 예외 발생: %hs"), e.what());
+
+                            // 파일 처리 결과 저장
+                            fileManager.AddProcessResult(fileData.filePath, true, errorMsg);
+
+                            // 디버그 로그 추가
+                            pDlg->AddDebugLog(errorMsg, fileData.filePath, DebugLogItem::LOG_ERROR);
+                        }
                     }
                 }
             }
