@@ -59,6 +59,39 @@ BOOL CThreadSub::InitInstance()
         StartDirectoryWatch(folderPath);
     }
 
+    // EasyView 엔진에 연결
+    char szProjectName[256] = "T_MQTT"; // 여기에 실제 EasyView 프로젝트 이름을 입력
+    int nResult = EV_OpenMem(szProjectName);
+    if (nResult > 0) {
+        TRACE("EasyView 엔진에 연결 성공: %s\n", szProjectName);
+
+        /*
+        // 태그 정보 디버그 출력
+        ST_EV_TAG_INFO tagInfo;
+        if (EV_GetTagInfo("TIMER_COUNTER", &tagInfo) > 0) {
+            TRACE("TIMER_COUNTER 태그 찾음: 유형=%d, 스테이션=%d, 위치=%d\n",
+                tagInfo.nTagType, tagInfo.nStnPos, tagInfo.nTagPos);
+        }
+        // 다른 태그에 대해서도 동일하게 확인
+        if (EV_GetTagInfo("TEMPERATURE", &tagInfo) > 0) {
+            TRACE("TEMPERATURE 태그 찾음: 유형=%d, 스테이션=%d, 위치=%d\n",
+                tagInfo.nTagType, tagInfo.nStnPos, tagInfo.nTagPos);
+        }
+
+        if (EV_GetTagInfo("IOLINK_PDIN", &tagInfo) > 0) {
+            TRACE("IOLINK_PDIN 태그 찾음: 유형=%d, 스테이션=%d, 위치=%d\n",
+                tagInfo.nTagType, tagInfo.nStnPos, tagInfo.nTagPos);
+        }
+
+        else {
+            TRACE("태그를 찾을 수 없음\n");
+        }
+        */
+    }
+    else {
+        TRACE("EasyView 엔진에 연결 실패: %d\n", nResult);
+    }
+
 
     return TRUE;
 }
@@ -598,11 +631,11 @@ int CThreadSub::Run()
                 JsonFileData fileData = fileManager.GetNextPendingFile();
                 if (!fileData.filePath.IsEmpty()) {
                     try {
-                        // JSON 파싱
+                        // JSON 파싱 (한 번만 수행)
                         CJsonParser jsonParser;
                         bool parsed = jsonParser.ParseMessage(fileData.content.c_str(), fileData.content.length());
 
-                        // 파서에서 얻은 결과로 오류 여부 확인
+                        // 파싱 결과 검증
                         bool hasError = false;
                         CString errorMessage;
 
@@ -616,11 +649,33 @@ int CThreadSub::Run()
                             hasError = true;
                             errorMessage = jsonParser.GetErrorMessage();
                         }
+                        else {
+                            // 디버그 출력
+                            jsonParser.TraceEventData();
 
-                        // 파일 처리 결과 저장
-                        fileManager.AddProcessResult(fileData.filePath, hasError, errorMessage);
+                            // JSON 데이터를 EasyView 태그에 적용
+                            bool tagResult = jsonParser.ApplyJsonToTags();
 
-                        // 처리 완료로 표시
+                            // 로그 추가
+                            if (tagResult) {
+                                TRACE("EasyView 태그 적용 성공\n");
+
+                                // 메인 다이얼로그의 디버그 로그에 추가 (선택사항)
+                                if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd())) {
+                                    CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                                    pDlg->AddDebugLog(_T("JSON 데이터 태그 적용 성공"), fileData.filePath, DebugLogItem::LOG_SUCCESS);
+                                }
+                            }
+                            else {
+                                TRACE("EasyView 태그 적용 실패 또는 적용할 태그 없음\n");
+                            }
+
+                            // 결과 저장
+                            resultManager.StoreResult(fileData.filePath, jsonParser.GetEventData());
+                            fileManager.AddProcessResult(fileData.filePath, false, _T(""));
+                        }
+
+                        // 처리 완료로 표시 (한 번만 호출)
                         fileManager.MarkFileAsProcessed(fileData.filePath);
 
                         // 오류가 있는 경우에만 디버그 리스트에 추가
@@ -637,10 +692,9 @@ int CThreadSub::Run()
                             pDlg->AddDebugLog(errorMessage, fileData.filePath, logType);
                         }
 
-                        // 파싱 통계 업데이트
+                        // 파싱 통계 업데이트 (한 번만 호출)
                         m_nParsedCount++;
                         UpdateStats(m_nParsedCount, m_nTotalCount);
-
                     }
                     catch (const std::exception& e) {
                         // 예외 발생 시

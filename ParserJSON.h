@@ -66,6 +66,7 @@ public:
     void TraceEventData();
 
     bool IsValid() const { return m_isValid; }
+    bool ApplyJsonToTags() const;
 
 private:
     EventData m_eventData;

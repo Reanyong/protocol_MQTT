@@ -10,4 +10,8 @@
 // 여기에 미리 컴파일하려는 헤더 추가
 #include "framework.h"
 
+#include "..\include\EVStruct.h"
+#include "..\Include\EVCommLib.h"
+#include "..\Include\EVILib.h"
+
 #endif //PCH_H
