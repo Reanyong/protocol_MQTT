@@ -52,18 +52,30 @@ CThreadSub::~CThreadSub()
 
 BOOL CThreadSub::InitInstance()
 {
-
     CString folderPath = CConfigManager::GetInstance().GetJsonFolderPath();
+
     if (!folderPath.IsEmpty())
     {
         StartDirectoryWatch(folderPath);
     }
 
     // EasyView 엔진에 연결
-    char szProjectName[256] = "T_MQTT"; // 여기에 실제 EasyView 프로젝트 이름을 입력
+    char szBuff[256] = { 0, };
+    char szProjectName[256] = { 0, };
+
+    EV_GetConfigFile(szBuff);
+    ::GetPrivateProfileString(
+        "EasyView",        // 섹션 이름
+        "Project",         // 키 이름
+        "",                // 기본값 (없으면 빈 문자열)
+        szProjectName,     // 결과 버퍼
+        sizeof(szProjectName),
+        szBuff             // INI 파일 경로
+    );
+
     int nResult = EV_OpenMem(szProjectName);
     if (nResult > 0) {
-        TRACE("EasyView 엔진에 연결 성공: %s\n", szProjectName);
+        TRACE(_T("EasyView 엔진에 연결 성공: %s\n"), szProjectName);
 
         /*
         // 태그 정보 디버그 출력
@@ -631,87 +643,49 @@ int CThreadSub::Run()
                 JsonFileData fileData = fileManager.GetNextPendingFile();
                 if (!fileData.filePath.IsEmpty()) {
                     try {
-                        // JSON 파싱 (한 번만 수행)
+                        // 1. 파일명으로부터 세트 번호 확인
+                        int setNumber = configManager.GetSetNumberForJsonFile(fileData.filePath);
+
+                        TRACE("파일 '%s'의 세트 번호: %d\n", fileData.filePath, setNumber);
+
+                        // 2. 세트에 해당하는 태그 이름 가져오기
+                        CString timerCounterTag, temperatureTag, ioLinkPdinTag;
+                        configManager.GetTagNamesForSet(setNumber, timerCounterTag, temperatureTag, ioLinkPdinTag);
+
+                        TRACE("태그 이름: %s, %s, %s\n", timerCounterTag, temperatureTag, ioLinkPdinTag);
+
+                        // 3. JSON 파싱
                         CJsonParser jsonParser;
                         bool parsed = jsonParser.ParseMessage(fileData.content.c_str(), fileData.content.length());
 
-                        // 파싱 결과 검증
-                        bool hasError = false;
-                        CString errorMessage;
+                        if (parsed) {
+                            // 4. 태그 적용
+                            bool tagResult = jsonParser.ApplyJsonToTags(
+                                timerCounterTag, temperatureTag, ioLinkPdinTag,
+                                setNumber, configManager.GetTagGroup());
 
-                        if (!parsed) {
-                            // 기본 파싱 실패 (JSON 형식 오류)
-                            hasError = true;
-                            errorMessage = _T("JSON 파싱 오류");
-                        }
-                        else if (jsonParser.GetParseStatus() != CJsonParser::PARSE_SUCCESS) {
-                            // 기본 파싱은 성공했지만 데이터 검증 오류 발생
-                            hasError = true;
-                            errorMessage = jsonParser.GetErrorMessage();
-                        }
-                        else {
-                            // 디버그 출력
-                            jsonParser.TraceEventData();
+                            // 여기서 성공 카운터 증가 및 통계 업데이트
+                            m_nParsedCount++;
+                            UpdateStats(m_nParsedCount, m_nTotalCount);
 
-                            // JSON 데이터를 EasyView 태그에 적용
-                            bool tagResult = jsonParser.ApplyJsonToTags();
-
-                            // 로그 추가
-                            if (tagResult) {
-                                TRACE("EasyView 태그 적용 성공\n");
-
-                                // 메인 다이얼로그의 디버그 로그에 추가 (선택사항)
-                                if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd())) {
-                                    CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-                                    pDlg->AddDebugLog(_T("JSON 데이터 태그 적용 성공"), fileData.filePath, DebugLogItem::LOG_SUCCESS);
-                                }
-                            }
-                            else {
-                                TRACE("EasyView 태그 적용 실패 또는 적용할 태그 없음\n");
+                            // 성공 로그 출력
+                            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                            if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+                                pDlg->AddDebugLog(_T("파일 파싱 성공"), fileData.filePath, DebugLogItem::LOG_SUCCESS);
                             }
 
-                            // 결과 저장
-                            resultManager.StoreResult(fileData.filePath, jsonParser.GetEventData());
-                            fileManager.AddProcessResult(fileData.filePath, false, _T(""));
+                            TRACE("파일 '%s' 파싱 성공, 현재 통계: %d/%d\n",
+                                fileData.filePath, m_nParsedCount, m_nTotalCount);
                         }
 
-                        // 처리 완료로 표시 (한 번만 호출)
+                        // 중요: 파싱 결과와 상관없이 처리 완료로 표시
                         fileManager.MarkFileAsProcessed(fileData.filePath);
 
-                        // 오류가 있는 경우에만 디버그 리스트에 추가
-                        if (hasError && m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd())) {
-                            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-
-                            // 오류 유형에 따라 로그 타입 설정
-                            DebugLogItem::LogType logType = DebugLogItem::LOG_ERROR;
-                            if (jsonParser.GetParseStatus() == CJsonParser::PARSE_TYPE_ERROR) {
-                                logType = DebugLogItem::LOG_WARNING;  // 타입 오류는 경고로 표시
-                            }
-
-                            // 디버그 로그 추가
-                            pDlg->AddDebugLog(errorMessage, fileData.filePath, logType);
-                        }
-
-                        // 파싱 통계 업데이트 (한 번만 호출)
-                        m_nParsedCount++;
-                        UpdateStats(m_nParsedCount, m_nTotalCount);
                     }
                     catch (const std::exception& e) {
-                        // 예외 발생 시
+                        // 예외 처리...
                         fileManager.MarkFileAsProcessed(fileData.filePath);
-
-                        // 오류 로그 추가
-                        if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd())) {
-                            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-                            CString errorMsg;
-                            errorMsg.Format(_T("처리 중 예외 발생: %hs"), e.what());
-
-                            // 파일 처리 결과 저장
-                            fileManager.AddProcessResult(fileData.filePath, true, errorMsg);
-
-                            // 디버그 로그 추가
-                            pDlg->AddDebugLog(errorMsg, fileData.filePath, DebugLogItem::LOG_ERROR);
-                        }
+                        TRACE("파싱 처리 중 예외 발생: %s\n", e.what());
                     }
                 }
             }

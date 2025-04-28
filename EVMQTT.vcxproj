@@ -79,6 +79,7 @@
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>C:\Program Files %28x86%29\Codejock Software\MFC\Xtreme ToolkitPro v19.1.0\Source;$(IncludePath)</IncludePath>
     <LibraryPath>C:\Program Files %28x86%29\Codejock Software\MFC\Xtreme ToolkitPro v19.1.0\Lib\vc160;$(LibraryPath)</LibraryPath>
+    <OutDir>C:\EasyView3.5\Bin\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
@@ -104,7 +105,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <OutputFile>..\Bin\$(TargetName)$(TargetExt)</OutputFile>
+      <OutputFile>C:\EasyView3.5\Bin\EVMQTT.exe</OutputFile>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
       <AdditionalDependencies>..\lib\EvCommLib.lib;..\lib\EVILib.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -157,6 +158,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>..\lib\EvCommLib.lib;..\lib\EVILib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>C:\EasyView3.5\Bin\EVMQTT.exe</OutputFile>
     </Link>
     <Midl>
       <MkTypLibCompatible>false</MkTypLibCompatible>

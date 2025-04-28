@@ -5,6 +5,7 @@ CConfigManager::CConfigManager()
     : m_jsonFolderPath(_T(""))
     , m_sortMethod(FileSortMethod::BY_NAME)  // 기본값: 이름순
     , m_parsingInterval(1000) // 기본값 1초
+    , m_tagGroup(_T(""))  //
 {
     // INI 파일 경로 설정 (실행 파일과 같은 경로에 저장)
     TCHAR szPath[MAX_PATH] = { 0 };
@@ -33,6 +34,8 @@ CConfigManager& CConfigManager::GetInstance()
 
 bool CConfigManager::LoadConfig()
 {
+    bool result = true;
+
     try {
         // INI 파일에서 폴더 경로 읽기
         TCHAR szFolderPath[MAX_PATH] = { 0 };
@@ -50,7 +53,40 @@ bool CConfigManager::LoadConfig()
             szSortMethod, 32, m_iniFilePath);
         m_sortMethod = StringToSortMethod(szSortMethod);
 
-        return true;
+        TCHAR szTagGroup[64] = { 0 };
+        GetPrivateProfileString(_T("TagInfo"), _T("TagGroup"), _T("MQTT"),
+            szTagGroup, 64, m_iniFilePath);
+        m_tagGroup = szTagGroup;
+
+        // 태그셋 정보 초기화
+        m_setToJsonFile.clear();
+        m_jsonFileToSet.clear();
+
+        for (int i = 1; i <= 20; i++) {  // 최대 20개 세트 지원
+            CString key;
+            key.Format(_T("%dset"), i);
+
+            TCHAR szJsonFile[64] = { 0 };
+            GetPrivateProfileString(_T("TagInfo"), key, _T(""),
+                szJsonFile, 64, m_iniFilePath);
+
+            CString jsonFile = szJsonFile;
+            if (!jsonFile.IsEmpty()) {
+                // JSON 확장자 추가 (.json이 없다면)
+                if (jsonFile.Right(5).CompareNoCase(_T(".json")) != 0) {
+                    jsonFile += _T(".json");
+                }
+
+                m_setToJsonFile[i] = jsonFile;
+                m_jsonFileToSet[jsonFile] = i;
+
+                TRACE("태그셋 로드: %d -> %s\n", i, jsonFile);
+            }
+        }
+
+        result = result && LoadTagSets();
+
+        return result;
     }
     catch (const std::exception& e) {
         OutputDebugStringW(L"설정 로드 오류: ");
@@ -62,6 +98,8 @@ bool CConfigManager::LoadConfig()
 
 bool CConfigManager::SaveConfig()
 {
+    bool result = true;
+
     try {
         // INI 파일에 설정 저장
 
@@ -80,7 +118,31 @@ bool CConfigManager::SaveConfig()
         WritePrivateProfileString(_T("General"), _T("SortMethod"),
             strSortMethod, m_iniFilePath);
 
-        return true;
+        WritePrivateProfileString(_T("TagInfo"), _T("TagGroup"),
+            m_tagGroup, m_iniFilePath);
+
+        for (int i = 1; i <= 20; i++) {
+            CString key;
+            key.Format(_T("%dset"), i);
+            WritePrivateProfileString(_T("TagInfo"), key, NULL, m_iniFilePath);
+        }
+
+        for (const auto& pair : m_setToJsonFile) {
+            CString key;
+            key.Format(_T("%dset"), pair.first);
+
+            // .json 확장자 제거하여 저장
+            CString jsonFile = pair.second;
+            if (jsonFile.Right(5).CompareNoCase(_T(".json")) == 0) {
+                jsonFile = jsonFile.Left(jsonFile.GetLength() - 5);
+            }
+
+            WritePrivateProfileString(_T("TagInfo"), key, jsonFile, m_iniFilePath);
+        }
+
+        result = result && SaveTagSets();
+
+        return result;
     }
     catch (const std::exception& e) {
         OutputDebugStringW(L"설정 저장 오류: ");
@@ -145,4 +207,109 @@ FileSortMethod CConfigManager::StringToSortMethod(const CString& methodStr)
         return FileSortMethod::BY_MODIFIED;
     else
         return FileSortMethod::NONE;
+}
+
+CString CConfigManager::GetTagGroup() const
+{
+    return m_tagGroup;
+}
+
+// 태그 그룹 setter
+void CConfigManager::SetTagGroup(const CString& tagGroup)
+{
+    m_tagGroup = tagGroup;
+}
+
+// 세트 번호로 JSON 파일 이름 가져오기
+CString CConfigManager::GetJsonFileForSet(int setNumber) const
+{
+    auto it = m_setToJsonFile.find(setNumber);
+    if (it != m_setToJsonFile.end()) {
+        return it->second;
+    }
+    return _T("");
+}
+
+// JSON 파일명으로 세트 번호 가져오기
+int CConfigManager::GetSetNumberForJsonFile(const CString& jsonFileName) const
+{
+    // 파일명에서 경로 제거
+    CString fileName = jsonFileName;
+    int pos = fileName.ReverseFind('\\');
+    if (pos >= 0) {
+        fileName = fileName.Mid(pos + 1);
+    }
+
+    // JSON 확장자 추가 (.json이 없다면)
+    if (fileName.Right(5).CompareNoCase(_T(".json")) != 0) {
+        fileName += _T(".json");
+    }
+
+    auto it = m_jsonFileToSet.find(fileName);
+    if (it != m_jsonFileToSet.end()) {
+        return it->second;
+    }
+    return 0; // 0은 유효하지 않은 세트 번호
+}
+
+// 세트 번호로 태그 이름 생성
+void CConfigManager::GetTagNamesForSet(int setNumber, CString& timerCounterTag,
+    CString& temperatureTag, CString& ioLinkPdinTag) const
+{
+    if (setNumber == 1) {
+        // 기본 태그 이름
+        timerCounterTag = _T("TIMER_COUNTER");
+        temperatureTag = _T("TEMPERATURE");
+        ioLinkPdinTag = _T("IOLINK_PDIN");
+    }
+    else {
+        // 세트 번호를 붙인 태그 이름
+        timerCounterTag.Format(_T("TIMER_COUNTER%d"), setNumber);
+        temperatureTag.Format(_T("TEMPERATURE%d"), setNumber);
+        ioLinkPdinTag.Format(_T("IOLINK_PDIN%d"), setNumber);
+    }
+}
+
+// 태그셋 추가
+void CConfigManager::AddTagSet(int setNumber, const CString& jsonFileName)
+{
+    if (setNumber <= 0) return;
+
+    // JSON 확장자 추가 (.json이 없다면)
+    CString fileName = jsonFileName;
+    if (fileName.Right(5).CompareNoCase(_T(".json")) != 0) {
+        fileName += _T(".json");
+    }
+
+    m_setToJsonFile[setNumber] = fileName;
+    m_jsonFileToSet[fileName] = setNumber;
+}
+
+// 태그셋 삭제
+void CConfigManager::RemoveTagSet(int setNumber)
+{
+    auto it = m_setToJsonFile.find(setNumber);
+    if (it != m_setToJsonFile.end()) {
+        m_jsonFileToSet.erase(it->second);
+        m_setToJsonFile.erase(it);
+    }
+}
+
+bool CConfigManager::LoadTagSets()
+{
+    // 이미 LoadConfig()에서 모든 작업을 수행하므로 여기서는 항상 성공 반환
+    return true;
+}
+
+// 태그셋 저장 (별도 메서드로 분리)
+bool CConfigManager::SaveTagSets()
+{
+    // 이미 SaveConfig()에서 모든 작업을 수행하므로 여기서는 항상 성공 반환
+    return true;
+}
+
+// 태그셋 개수 반환
+int CConfigManager::GetTagSetCount() const
+{
+    return static_cast<int>(m_setToJsonFile.size());
 }

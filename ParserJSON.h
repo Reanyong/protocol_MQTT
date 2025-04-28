@@ -66,7 +66,12 @@ public:
     void TraceEventData();
 
     bool IsValid() const { return m_isValid; }
-    bool ApplyJsonToTags() const;
+    bool ApplyJsonToTags(
+        const CString& timerCounterTag = _T("TIMER_COUNTER"),
+        const CString& temperatureTag = _T("TEMPERATURE"),
+        const CString& ioLinkPdinTag = _T("IOLINK_PDIN"),
+        int setNumber = 1,
+        const CString& tagGroup = _T("")) const;
 
 private:
     EventData m_eventData;

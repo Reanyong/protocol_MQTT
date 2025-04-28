@@ -309,7 +309,6 @@ void CEVMQTTDlg::UpdateParsingStats(int parsedCount, int totalCount)
 
 	TRACE("UpdateParsingStats: m_nParsedCount=%d, m_nTotalCount=%d\n", m_nParsedCount, m_nTotalCount);
 
-	// 포맷 문자열 수정 - %d가 아닌 %ld로 변경해볼 것
 	CString statsText;
 	statsText.Format(_T("json 파싱 결과: %ld / %ld"), (long)m_nParsedCount, (long)m_nTotalCount);
 	// 또는 다른 방식으로 시도:

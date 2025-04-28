@@ -293,47 +293,34 @@ void CJsonParser::TraceEventData()
     OutputDebugStringW(L"----------------------\n");
 }
 
-bool CJsonParser::ApplyJsonToTags() const
+bool CJsonParser::ApplyJsonToTags(
+    const CString& timerCounterTag,
+    const CString& temperatureTag,
+    const CString& ioLinkPdinTag,
+    int setNumber,
+    const CString& tagGroup) const
 {
-    // JSON 파싱
-    CJsonParser jsonParser;
-
     // 이벤트 코드가 "event"인 경우에만 처리
-    const CJsonParser::EventData& eventData = this->GetEventData(); // this-> 또는 m_eventData 직접 참조
-
-    if (eventData.code != "event") {
+    if (m_eventData.code != "event") {
         return false;
     }
 
     bool result = false;
     ST_EV_TAG_INFO tagInfo;
 
-    /*
-    EasyView3.5 Connection TagStn Test
-    TRACE("Checking tag: TIMER_COUNTER\n");
-    int tagResult = EV_GetTagInfo("TIMER_COUNTER", &tagInfo);
-    if (tagResult > 0) {
-        TRACE("Found TIMER_COUNTER tag: Type=%d, StnPos=%d, TagPos=%d\n",
-            tagInfo.nTagType, tagInfo.nStnPos, tagInfo.nTagPos);
-    }
-    else {
-        TRACE("TIMER_COUNTER tag not found: %d\n", tagResult);
-    }
-    */
-
     // 타이머 카운터 처리
-    if (eventData.timerCounter.valid && eventData.timerCounter.code == 200) {
-        // 태그 정보 조회
-        if (EV_GetTagInfo("TIMER_COUNTER", &tagInfo) > 0) {
+    if (m_eventData.timerCounter.valid && m_eventData.timerCounter.code == 200) {
+        // 세트별 태그 이름 사용
+        if (EV_GetTagInfo(timerCounterTag, &tagInfo) > 0) {
             // 태그 유형에 따라 처리
             switch (tagInfo.nTagType) {
             case TYPE_DI:
             case TYPE_DO:
-                EV_PutSBDiValue(tagInfo.nStnPos, tagInfo.nTagPos, eventData.timerCounter.data ? 1 : 0);
+                EV_PutSBDiValue(tagInfo.nStnPos, tagInfo.nTagPos, m_eventData.timerCounter.data ? 1 : 0);
                 break;
             case TYPE_AI:
             case TYPE_AO:
-                EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, eventData.timerCounter.data);
+                EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, m_eventData.timerCounter.data);
                 break;
             }
             result = true;
@@ -341,22 +328,22 @@ bool CJsonParser::ApplyJsonToTags() const
     }
 
     // 온도 데이터 처리
-    if (eventData.temperature.valid && eventData.temperature.code == 200) {
-        if (EV_GetTagInfo("TEMPERATURE", &tagInfo) > 0) {
+    if (m_eventData.temperature.valid && m_eventData.temperature.code == 200) {
+        if (EV_GetTagInfo(temperatureTag, &tagInfo) > 0) {
             if (tagInfo.nTagType == TYPE_AI || tagInfo.nTagType == TYPE_AO) {
-                EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, eventData.temperature.data);
+                EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, m_eventData.temperature.data);
                 result = true;
             }
         }
     }
 
     // IOLink 데이터 처리
-    if (eventData.iolinkDevice.valid && eventData.iolinkDevice.code == 200) {
-        if (EV_GetTagInfo("IOLINK_PDIN", &tagInfo) > 0) {
+    if (m_eventData.iolinkDevice.valid && m_eventData.iolinkDevice.code == 200) {
+        if (EV_GetTagInfo(ioLinkPdinTag, &tagInfo) > 0) {
             if (tagInfo.nTagType == TYPE_SI) {
                 EV_PutSBString(tagInfo.nStnPos, tagInfo.nTagPos * 2,
-                               eventData.iolinkDevice.data.c_str(),
-                               eventData.iolinkDevice.data.length());
+                    m_eventData.iolinkDevice.data.c_str(),
+                    m_eventData.iolinkDevice.data.length());
                 result = true;
             }
         }
