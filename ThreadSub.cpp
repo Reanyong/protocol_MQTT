@@ -345,22 +345,45 @@ void CThreadSub::UpdateStats(int parsedCount, int totalCount)
     {
         TRACE("UpdateStats: parsedCount=%d, totalCount=%d\n", parsedCount, totalCount);
 
-        // UI 스레드에 메시지 전송
+        MSG msg;
+        while (::PeekMessage(&msg, m_pOwner->GetSafeHwnd(), WM_USER + 100, WM_USER + 100, PM_REMOVE))
+        {
+            TRACE("메시지 큐에서 이전 통계 메시지 제거됨\n");
+        }
+
         ::PostMessage(m_pOwner->GetSafeHwnd(), WM_USER + 100, parsedCount, totalCount);
     }
 }
 
 void CThreadSub::InitializeFileProcessing()
 {
-    // 기존 처리 결과 초기화
-    CJsonFileManager::GetInstance().ClearProcessedFiles();
+    // 파싱 통계 초기화
+    m_nParsedCount = 0;
+    m_nTotalCount = 0;
 
+    // UI에 초기 통계 표시
+    if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd())) {
+        ::PostMessage(m_pOwner->GetSafeHwnd(), WM_USER + 100, m_nParsedCount, m_nTotalCount);
+    }
+
+    // 기존 처리 결과 초기화
+    //CJsonFileManager::GetInstance().ClearProcessedFiles();
+    CJsonFileManager::GetInstance().ClearProcessResults(true);
+
+    /*
     // 디렉토리 다시 스캔
     CString folderPath = CConfigManager::GetInstance().GetJsonFolderPath();
     if (!folderPath.IsEmpty()) {
         CJsonFileManager::GetInstance().ScanJsonFolder(folderPath,
             CConfigManager::GetInstance().GetSortMethod());
+
+        // 총 파일 수만 업데이트 (파싱된 파일 수는 0으로 유지)
+        m_nTotalCount = CJsonFileManager::GetInstance().GetTotalJsonCount();
+        if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd())) {
+            ::PostMessage(m_pOwner->GetSafeHwnd(), WM_USER + 100, m_nParsedCount, m_nTotalCount);
+        }
     }
+    */
 }
 
 bool CThreadSub::IsValidJsonFile(const CString& filePath)
@@ -646,13 +669,13 @@ int CThreadSub::Run()
                         // 1. 파일명으로부터 세트 번호 확인
                         int setNumber = configManager.GetSetNumberForJsonFile(fileData.filePath);
 
-                        TRACE("파일 '%s'의 세트 번호: %d\n", fileData.filePath, setNumber);
+                        TRACE("file '%s' set number: %d\n", fileData.filePath, setNumber);
 
                         // 2. 세트에 해당하는 태그 이름 가져오기
                         CString timerCounterTag, temperatureTag, ioLinkPdinTag;
                         configManager.GetTagNamesForSet(setNumber, timerCounterTag, temperatureTag, ioLinkPdinTag);
 
-                        TRACE("태그 이름: %s, %s, %s\n", timerCounterTag, temperatureTag, ioLinkPdinTag);
+                        TRACE("Tagname: %s, %s, %s\n", timerCounterTag, temperatureTag, ioLinkPdinTag);
 
                         // 3. JSON 파싱
                         CJsonParser jsonParser;
@@ -671,10 +694,10 @@ int CThreadSub::Run()
                             // 성공 로그 출력
                             CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
                             if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-                                pDlg->AddDebugLog(_T("파일 파싱 성공"), fileData.filePath, DebugLogItem::LOG_SUCCESS);
+                                pDlg->AddDebugLog(_T("File Parsed"), fileData.filePath, DebugLogItem::LOG_SUCCESS);
                             }
 
-                            TRACE("파일 '%s' 파싱 성공, 현재 통계: %d/%d\n",
+                            TRACE("File '%s' Parsing Success, Current Status: %d/%d\n",
                                 fileData.filePath, m_nParsedCount, m_nTotalCount);
                         }
 
@@ -685,7 +708,7 @@ int CThreadSub::Run()
                     catch (const std::exception& e) {
                         // 예외 처리...
                         fileManager.MarkFileAsProcessed(fileData.filePath);
-                        TRACE("파싱 처리 중 예외 발생: %s\n", e.what());
+                        TRACE("Parsing exception: %s\n", e.what());
                     }
                 }
             }

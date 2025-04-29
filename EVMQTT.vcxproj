@@ -90,6 +90,7 @@
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>C:\Program Files %28x86%29\Codejock Software\MFC\Xtreme ToolkitPro v19.1.0\Source;$(IncludePath)</IncludePath>
     <LibraryPath>C:\Program Files %28x86%29\Codejock Software\MFC\Xtreme ToolkitPro v19.1.0\Lib\vc160;$(LibraryPath)</LibraryPath>
+    <OutDir>C:\EasyView3.5\Bin\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>

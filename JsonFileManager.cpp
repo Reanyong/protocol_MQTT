@@ -118,6 +118,16 @@ void CJsonFileManager::ScanJsonFolder(const CString& folderPath, FileSortMethod 
         return;
     }
 
+    std::map<CString, bool> processedFiles;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& pair : m_jsonFiles) {
+            if (pair.second.processed) {
+                processedFiles[pair.first] = true;
+            }
+        }
+    }
+
     // Find JSON files in folder
     std::vector<FileInfo> files = FindJsonFilesInFolder(folderPath);
 
@@ -143,6 +153,11 @@ void CJsonFileManager::ScanJsonFolder(const CString& folderPath, FileSortMethod 
 
     // Process sorted file list
     for (const auto& fileInfo : files) {
+        // 이미 처리된 파일은 건너뛰기 (초기화 후 재스캔 시 중복 방지)
+        if (processedFiles.find(fileInfo.filePath) != processedFiles.end()) {
+            TRACE("이미 처리된 파일 건너뛰기: %s\n", fileInfo.filePath);
+            continue;
+        }
         LoadJsonFile(fileInfo.filePath);
     }
 
@@ -339,8 +354,15 @@ std::vector<CJsonFileManager::FileProcessResult> CJsonFileManager::GetErrorFiles
 }
 
 // 파일 처리 결과 초기화
-void CJsonFileManager::ClearProcessResults()
+void CJsonFileManager::ClearProcessResults(bool resetAll)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_processResults.clear();
+
+    if (resetAll) {
+        m_jsonFiles.clear();      // 전체 파일 데이터 초기화
+        m_pendingQueue.clear();   // 처리 대기 큐 초기화
+
+        TRACE("JsonFileManager 완전 초기화됨\n");
+    }
 }

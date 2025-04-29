@@ -222,6 +222,10 @@ void CEVMQTTDlg::BeginThreadSub()
 {
 	if (m_pThreadSub == NULL)
 	{
+		m_nParsedCount = 0;
+		m_nTotalCount = 0;
+		UpdateParsingStats(0, 0);
+
 		// 스레드 생성
 		m_pThreadSub = (CThreadSub*)AfxBeginThread(RUNTIME_CLASS(CThreadSub),
 			THREAD_PRIORITY_HIGHEST, 0, CREATE_SUSPENDED);
@@ -229,6 +233,9 @@ void CEVMQTTDlg::BeginThreadSub()
 
 		// 스레드 시작 전 초기화 작업 실행
 		m_pThreadSub->InitializeFileProcessing();
+
+		m_nTotalCount = m_pThreadSub->m_nTotalCount;
+		UpdateParsingStats(m_nParsedCount, m_nTotalCount);
 
 		// 스레드 시작
 		m_pThreadSub->ResumeThread();
@@ -340,7 +347,9 @@ LRESULT CEVMQTTDlg::OnUpdateStats(WPARAM wParam, LPARAM lParam)
 
 	TRACE("OnUpdateStats: parsedCount=%d, totalCount=%d\n", parsedCount, totalCount);
 
-	UpdateParsingStats(parsedCount, totalCount);
+	if (m_nParsedCount != parsedCount || m_nTotalCount != totalCount) {
+		UpdateParsingStats(parsedCount, totalCount);
+	}
 	return 0;
 }
 

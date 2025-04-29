@@ -1,6 +1,8 @@
 ﻿#include "pch.h"
 #include "ParserJSON.h"
 #include "ErrorMessages.h"
+#include <sstream>
+#include <string>
 
 CJsonParser::CJsonParser()
 {
@@ -337,10 +339,86 @@ bool CJsonParser::ApplyJsonToTags(
         }
     }
 
-    // IOLink 데이터 처리
+    /*
+    // IOLink 데이터 처리 SI
     if (m_eventData.iolinkDevice.valid && m_eventData.iolinkDevice.code == 200) {
         if (EV_GetTagInfo(ioLinkPdinTag, &tagInfo) > 0) {
             if (tagInfo.nTagType == TYPE_SI) {
+                EV_PutSBString(tagInfo.nStnPos, tagInfo.nTagPos * 2,
+                    m_eventData.iolinkDevice.data.c_str(),
+                    m_eventData.iolinkDevice.data.length());
+                result = true;
+                TRACE("태그 정보 - 이름: %s, 타입: %d, 스테이션: %d, 위치: %d\n",
+                    ioLinkPdinTag, tagInfo.nTagType, tagInfo.nStnPos, tagInfo.nTagPos);
+                TRACE("전송 데이터: %s (길이: %d)\n",
+                    m_eventData.iolinkDevice.data.c_str(),
+                    m_eventData.iolinkDevice.data.length());
+            }
+        }
+    }
+    */
+
+    if (m_eventData.iolinkDevice.valid && m_eventData.iolinkDevice.code == 200) {
+        if (EV_GetTagInfo(ioLinkPdinTag, &tagInfo) > 0) {
+            if (tagInfo.nTagType == TYPE_AI || tagInfo.nTagType == TYPE_AO) {
+                // 문자열을 숫자로 변환
+                double value = 0.0;
+                bool result = true;
+
+                // 모든 문자가 16진수에 유효한지 확인하는 함수
+                auto isHexString = [](const std::string& str) {
+                    return str.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos;
+                };
+
+                // 접두사 확인과 16진수 판별
+                bool isHex = false;
+                std::string dataStr = m_eventData.iolinkDevice.data;
+
+                // "0x" 또는 "0X" 접두사가 있는 경우
+                if (dataStr.length() > 2 && (dataStr.substr(0, 2) == "0x" || dataStr.substr(0, 2) == "0X")) {
+                    dataStr = dataStr.substr(2);  // 접두사 제거
+                    isHex = true;
+                }
+                // 접두사 없이 16진수 형태인지 확인 (A-F 문자 포함)
+                else if (isHexString(dataStr) &&
+                    dataStr.find_first_of("ABCDEFabcdef") != std::string::npos) {
+                    isHex = true;
+                }
+
+                // 16진수로 처리
+                if (isHex) {
+                    unsigned int hexValue = 0;
+                    if (sscanf_s(dataStr.c_str(), "%x", &hexValue) == 1) {
+                        value = static_cast<double>(hexValue);
+                        TRACE("16진수 문자열 '%s'를 숫자 %f로 변환\n",
+                            m_eventData.iolinkDevice.data.c_str(), value);
+                    }
+                    else {
+                        TRACE("16진수 변환 실패: '%s'\n", m_eventData.iolinkDevice.data.c_str());
+                        result = false;
+                    }
+                }
+                // 10진수로 처리
+                else {
+                    try {
+                        value = atof(m_eventData.iolinkDevice.data.c_str());
+                        TRACE("10진수 문자열 '%s'를 숫자 %f로 변환\n",
+                            m_eventData.iolinkDevice.data.c_str(), value);
+                    }
+                    catch (...) {
+                        TRACE("10진수 변환 실패: '%s'\n", m_eventData.iolinkDevice.data.c_str());
+                        result = false;
+                    }
+                }
+
+                // 변환 성공 시 값 저장
+                if (result) {
+                    EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, value);
+                    TRACE("IOLink 데이터를 AI/AO 태그에 값 %f로 저장\n", value);
+                }
+            }
+            else if (tagInfo.nTagType == TYPE_SI) {
+                // 기존 문자열 처리 유지
                 EV_PutSBString(tagInfo.nStnPos, tagInfo.nTagPos * 2,
                     m_eventData.iolinkDevice.data.c_str(),
                     m_eventData.iolinkDevice.data.length());

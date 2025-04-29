@@ -65,7 +65,7 @@ public:
     std::vector<FileProcessResult> GetErrorFiles() const;
 
     // 파일 처리 결과 초기화
-    void ClearProcessResults();
+    void ClearProcessResults(bool resetAll = false);
 
 private:
     std::map<CString, JsonFileData> m_jsonFiles;     // 파일 데이터 맵 (키: 파일경로)

@@ -58,16 +58,15 @@ private:
 	HANDLE m_directoryHandle;        // 디렉토리 핸들
 	bool m_bWatchDirectory;          // 디렉토리 감시 활성화 플래그
 
-	// 파싱 통계 변수
-	int m_nParsedCount;   // 파싱 성공 파일 수
-	int m_nTotalCount;    // 총 JSON 파일 수
-
 	bool IsValidJsonFile(const CString& filePath);
 
 public:
 	bool StartDirectoryWatch(const CString& folderPath);
 	void StopDirectoryWatch();
 	void ProcessDirectoryChanges();
+
+	int m_nParsedCount;   // 파싱 성공 파일 수
+	int m_nTotalCount;    // 총 JSON 파일 수
 
 // Implementation
 protected:
