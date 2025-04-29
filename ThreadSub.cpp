@@ -75,7 +75,7 @@ BOOL CThreadSub::InitInstance()
 
     int nResult = EV_OpenMem(szProjectName);
     if (nResult > 0) {
-        TRACE(_T("EasyView 엔진에 연결 성공: %s\n"), szProjectName);
+        TRACE(_T("EasyView Engine Connected: %s\n"), szProjectName);
 
         /*
         // 태그 정보 디버그 출력
@@ -101,7 +101,7 @@ BOOL CThreadSub::InitInstance()
         */
     }
     else {
-        TRACE("EasyView 엔진에 연결 실패: %d\n", nResult);
+        TRACE("EasyView Engine Fail Connection: %d\n", nResult);
     }
 
 
@@ -131,7 +131,7 @@ void connect_callback(struct mosquitto* mosq, void* obj, int result)
 {
     TRACE("connect callback, rc=%d\n", result);
 }
-
+/*
 void message_callback(struct mosquitto* mosq, void* obj, const struct mosquitto_message* msg)
 {
     if (msg->payloadlen == 0)
@@ -172,6 +172,120 @@ void message_callback(struct mosquitto* mosq, void* obj, const struct mosquitto_
             if (eventData.iolinkDevice.valid) {
                 // IOLink 관련 처리
             }
+        }
+    }
+}
+*/
+
+void message_callback(struct mosquitto* mosq, void* obj, const struct mosquitto_message* msg)
+{
+    if (msg->payloadlen == 0)
+        return;
+
+    TRACE("topic '%s': message %s[%d] bytes\n", msg->topic, (char*)msg->payload, msg->payloadlen);
+
+    const char* payload = (const char*)msg->payload;
+    if (payload[0] != '{' && payload[0] != '[') {
+        TRACE("Received message is not in JSON format: %s\n", payload);
+        return; // JSON이 아니면 파싱하지 않고 종료
+    }
+
+    // ThreadSub 객체 포인터 가져오기 (obj 파라미터로 전달됨)
+    CThreadSub* pThreadSub = static_cast<CThreadSub*>(obj);
+    if (!pThreadSub) {
+        TRACE("ThreadSub object is NULL\n");
+        return;
+    }
+
+    CEVMQTTDlg* pDlg = (CEVMQTTDlg*)pThreadSub->m_pOwner;
+
+    try {
+        // JSON 메시지 파싱
+        CJsonParser jsonParser;
+        bool parsed = jsonParser.ParseMessage(payload, msg->payloadlen);
+
+        // 파서에서 얻은 결과로 오류 여부 확인
+        bool hasError = false;
+        CString errorMessage;
+        CString mqttIdentifier;
+        mqttIdentifier.Format(_T("MQTT/%s"), CStringA(msg->topic).GetString());
+
+        if (!parsed) {
+            // 기본 파싱 실패 (JSON 형식 오류)
+            hasError = true;
+            errorMessage = _T("MQTT JSON 파싱 오류");
+        }
+        else if (jsonParser.GetParseStatus() != CJsonParser::PARSE_SUCCESS) {
+            // 기본 파싱은 성공했지만 데이터 검증 오류 발생
+            hasError = true;
+            errorMessage = jsonParser.GetErrorMessage();
+        }
+        else {
+            // *** 중요: 항상 1번 세트(기본 3종 태그)에만 적용 ***
+            // 고정된 세트 번호 사용 (1번)
+            int setNumber = 1;  // 항상 1번 세트 사용
+
+            // 1번 세트에 해당하는 태그 이름 직접 설정
+            CString timerCounterTag = _T("TIMER_COUNTER");  // 1번 세트의 타이머 카운터 태그
+            CString temperatureTag = _T("TEMPERATURE");     // 1번 세트의 온도 태그
+            CString ioLinkPdinTag = _T("IOLINK_PDIN");      // 1번 세트의 IOLink PDIN 태그
+
+            // 또는 ConfigManager에서 가져오기
+            // CConfigManager::GetInstance().GetTagNamesForSet(1, timerCounterTag, temperatureTag, ioLinkPdinTag);
+
+            TRACE("MQTT Message - Always using Set 1, Tags: %s, %s, %s\n",
+                timerCounterTag, temperatureTag, ioLinkPdinTag);
+
+            // JSON 데이터를 EasyView 태그에 적용
+            bool tagResult = jsonParser.ApplyJsonToTags(
+                timerCounterTag, temperatureTag, ioLinkPdinTag,
+                setNumber, 0);  // 태그 그룹 0 사용 또는 ConfigManager에서 가져오기
+
+            if (tagResult) {
+                TRACE("MQTT 데이터가 EasyView 태그에 성공적으로 적용됨\n");
+
+                // 성공 로그 추가
+                if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+                    pDlg->AddDebugLog(_T("MQTT 메시지 처리 성공"), mqttIdentifier, DebugLogItem::LOG_SUCCESS);
+                }
+            }
+            else {
+                TRACE("MQTT 데이터를 EasyView 태그에 적용하는 데 실패함\n");
+                hasError = true;
+                errorMessage = _T("MQTT 데이터를 태그에 적용하지 못했습니다");
+            }
+
+            // 파싱된 데이터 결과 관리자에 저장
+            const CJsonParser::EventData& eventData = jsonParser.GetEventData();
+            CJsonResultManager::GetInstance().StoreResult(mqttIdentifier, eventData);
+        }
+
+        // 오류가 있는 경우에만 디버그 리스트에 추가
+        if (hasError && pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+            // 오류 유형에 따라 로그 타입 설정
+            DebugLogItem::LogType logType = DebugLogItem::LOG_ERROR;
+            if (jsonParser.GetParseStatus() == CJsonParser::PARSE_TYPE_ERROR) {
+                logType = DebugLogItem::LOG_WARNING;  // 타입 오류는 경고로 표시
+            }
+
+            // 디버그 로그 추가
+            pDlg->AddDebugLog(errorMessage, mqttIdentifier, logType);
+        }
+
+        // 파싱 통계 업데이트 - MQTT 메시지도 파싱 통계에 포함
+        if (pThreadSub) {
+            pThreadSub->m_nParsedCount++;
+            pThreadSub->UpdateStats(pThreadSub->m_nParsedCount, pThreadSub->m_nTotalCount);
+        }
+    }
+    catch (const std::exception& e) {
+        // 예외 발생 시
+        if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+            CString errorMsg;
+            errorMsg.Format(_T("MQTT 메시지 처리 중 예외 발생: %hs"), e.what());
+
+            // 디버그 로그 추가
+            pDlg->AddDebugLog(errorMsg, _T("MQTT"), DebugLogItem::LOG_ERROR);
         }
     }
 }
@@ -481,6 +595,7 @@ int CThreadSub::Run()
         nErrorCode = -2;
     }
     mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
+    mosquitto_user_data_set(mosq, this);
 
     // Settings load
     CConfigManager& configManager = CConfigManager::GetInstance();

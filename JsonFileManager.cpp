@@ -28,7 +28,7 @@ bool CJsonFileManager::LoadJsonFile(const CString& filePath)
 
             CEVMQTTDlg* pDlg = (CEVMQTTDlg*)AfxGetMainWnd();
             if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-                pDlg->AddDebugLog(_T("파일이 존재하지 않습니다"), filePath, DebugLogItem::LOG_ERROR);
+                pDlg->AddDebugLog(_T("File doesn't exists"), filePath, DebugLogItem::LOG_ERROR);
             }
             return false;
         }
@@ -155,7 +155,7 @@ void CJsonFileManager::ScanJsonFolder(const CString& folderPath, FileSortMethod 
     for (const auto& fileInfo : files) {
         // 이미 처리된 파일은 건너뛰기 (초기화 후 재스캔 시 중복 방지)
         if (processedFiles.find(fileInfo.filePath) != processedFiles.end()) {
-            TRACE("이미 처리된 파일 건너뛰기: %s\n", fileInfo.filePath);
+            TRACE("Passing already parsed: %s\n", fileInfo.filePath);
             continue;
         }
         LoadJsonFile(fileInfo.filePath);
@@ -363,6 +363,6 @@ void CJsonFileManager::ClearProcessResults(bool resetAll)
         m_jsonFiles.clear();      // 전체 파일 데이터 초기화
         m_pendingQueue.clear();   // 처리 대기 큐 초기화
 
-        TRACE("JsonFileManager 완전 초기화됨\n");
+        TRACE("JsonFileManager Inintialized\n");
     }
 }
