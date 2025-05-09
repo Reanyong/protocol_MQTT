@@ -31,10 +31,13 @@ CThreadSub::CThreadSub()
     m_bEndThread = FALSE;
     pParam = NULL;
 
+    /*
+    해당 설정 ConfigManager에서 진행
     sprintf_s(m_szIP, sizeof(m_szIP), "127.0.0.1");
     sprintf_s(m_szTopic, sizeof(m_szTopic), "my_topic");
     m_nPort = 1883;
     m_nKeepAlive = 60;
+    */
 
     m_directoryHandle = INVALID_HANDLE_VALUE;
     m_overlapped.hEvent = NULL;
@@ -568,10 +571,29 @@ int CThreadSub::Run()
     int nErrorCode = 1;
     int nNetworkLoop;
     TRACE(">>>>Start Loop\n");
+
+    /*
     char* mqtt_host = strdup(m_szIP);
     char* mqtt_topic = strdup(m_szTopic);
     int mqtt_port = m_nPort;
     int mqtt_keepalive = m_nKeepAlive;
+    */
+
+    CConfigManager& configManager = CConfigManager::GetInstance();
+    configManager.LoadConfig();
+
+    // ConfigManager에서 MQTT 설정 가져오기
+    CString mqttTopic = configManager.GetMqttTopic();
+    CString mqttIp = configManager.GetMqttIp();
+    int mqttPort = configManager.GetMqttPort();
+    int mqttKeepAlive = configManager.GetMqttKeepAlive();
+
+    // CString을 char*로 변환
+    char* mqtt_host = strdup(CT2A(mqttIp));
+    char* mqtt_topic = strdup(CT2A(mqttTopic));
+    int mqtt_port = mqttPort;
+    int mqtt_keepalive = mqttKeepAlive;
+
     int mdelay = 0;
     bool clean_session = true;
     struct mosquitto* mosq = NULL;
@@ -597,15 +619,14 @@ int CThreadSub::Run()
     mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
     mosquitto_user_data_set(mosq, this);
 
-    // Settings load
-    CConfigManager& configManager = CConfigManager::GetInstance();
-    configManager.LoadConfig();
-
     // JSON file manager
     CJsonFileManager& fileManager = CJsonFileManager::GetInstance();
 
     // Result manager
     CJsonResultManager& resultManager = CJsonResultManager::GetInstance();
+
+    TRACE("MQTT 설정 - 토픽: %s, IP: %s, 포트: %d, Keep-Alive: %d\n",
+        CT2A(mqttTopic), CT2A(mqttIp), mqttPort, mqttKeepAlive);
 
     // Variables for directory change detection
     HANDLE hDirectory = INVALID_HANDLE_VALUE;

@@ -5,7 +5,11 @@ CConfigManager::CConfigManager()
     : m_jsonFolderPath(_T(""))
     , m_sortMethod(FileSortMethod::BY_NAME)  // 기본값: 이름순
     , m_parsingInterval(1000) // 기본값 1초
-    , m_tagGroup(_T(""))  //
+    , m_tagGroup(_T(""))
+    , m_mqttTopic(_T("my_topic")) // 기본 토픽
+    , m_mqttIp(_T("127.0.0.1"))   // 기본 IP
+    , m_mqttPort(1883)            // 기본 포트
+    , m_mqttKeepAlive(60)         // 기본 keepalive
 {
     // INI 파일 경로 설정 (실행 파일과 같은 경로에 저장)
     TCHAR szPath[MAX_PATH] = { 0 };
@@ -57,6 +61,20 @@ bool CConfigManager::LoadConfig()
         GetPrivateProfileString(_T("TagInfo"), _T("TagGroup"), _T("MQTT"),
             szTagGroup, 64, m_iniFilePath);
         m_tagGroup = szTagGroup;
+
+        // MQTT 설정 읽기
+        TCHAR szMqttTopic[64] = { 0 };
+        GetPrivateProfileString(_T("General"), _T("Topic"), _T("my_topic"),
+            szMqttTopic, 64, m_iniFilePath);
+        m_mqttTopic = szMqttTopic;
+
+        TCHAR szMqttIp[64] = { 0 };
+        GetPrivateProfileString(_T("General"), _T("Ip"), _T("127.0.0.1"),
+            szMqttIp, 64, m_iniFilePath);
+        m_mqttIp = szMqttIp;
+
+        m_mqttPort = GetPrivateProfileInt(_T("General"), _T("Port"), 1883, m_iniFilePath);
+        m_mqttKeepAlive = GetPrivateProfileInt(_T("General"), _T("KeepAlive"), 60, m_iniFilePath);
 
         // 태그셋 정보 초기화
         m_setToJsonFile.clear();
@@ -112,6 +130,18 @@ bool CConfigManager::SaveConfig()
         strInterval.Format(_T("%d"), m_parsingInterval);
         WritePrivateProfileString(_T("General"), _T("ParsingInterval"),
             strInterval, m_iniFilePath);
+
+        // MQTT 설정 저장
+        WritePrivateProfileString(_T("General"), _T("Topic"), m_mqttTopic, m_iniFilePath);
+        WritePrivateProfileString(_T("General"), _T("Ip"), m_mqttIp, m_iniFilePath);
+
+        CString strPort;
+        strPort.Format(_T("%d"), m_mqttPort);
+        WritePrivateProfileString(_T("General"), _T("Port"), strPort, m_iniFilePath);
+
+        CString strKeepAlive;
+        strKeepAlive.Format(_T("%d"), m_mqttKeepAlive);
+        WritePrivateProfileString(_T("General"), _T("KeepAlive"), strKeepAlive, m_iniFilePath);
 
         // 정렬 방식 저장
         CString strSortMethod = SortMethodToString(m_sortMethod);
@@ -312,4 +342,44 @@ bool CConfigManager::SaveTagSets()
 int CConfigManager::GetTagSetCount() const
 {
     return static_cast<int>(m_setToJsonFile.size());
+}
+
+void CConfigManager::SetMqttTopic(const CString& topic)
+{
+    m_mqttTopic = topic;
+}
+
+CString CConfigManager::GetMqttTopic() const
+{
+    return m_mqttTopic;
+}
+
+void CConfigManager::SetMqttIp(const CString& ip)
+{
+    m_mqttIp = ip;
+}
+
+CString CConfigManager::GetMqttIp() const
+{
+    return m_mqttIp;
+}
+
+void CConfigManager::SetMqttPort(int port)
+{
+    m_mqttPort = port;
+}
+
+int CConfigManager::GetMqttPort() const
+{
+    return m_mqttPort;
+}
+
+void CConfigManager::SetMqttKeepAlive(int keepAlive)
+{
+    m_mqttKeepAlive = keepAlive;
+}
+
+int CConfigManager::GetMqttKeepAlive() const
+{
+    return m_mqttKeepAlive;
 }

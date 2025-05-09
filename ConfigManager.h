@@ -78,4 +78,23 @@ private:
     CString m_tagGroup;                       // 태그 그룹 이름
     std::map<int, CString> m_setToJsonFile;   // 세트 번호 -> JSON 파일명
     std::map<CString, int> m_jsonFileToSet;   // JSON 파일명 -> 세트 번호
+
+    CString m_mqttTopic;
+    CString m_mqttIp;
+    int m_mqttPort;
+    int m_mqttKeepAlive;
+
+public:
+    // MQTT Config Get & Set
+    void SetMqttTopic(const CString& topic);
+    CString GetMqttTopic() const;
+
+    void SetMqttIp(const CString& ip);
+    CString GetMqttIp() const;
+
+    void SetMqttPort(int port);
+    int GetMqttPort() const;
+
+    void SetMqttKeepAlive(int keepAlive);
+    int GetMqttKeepAlive() const;
 };
