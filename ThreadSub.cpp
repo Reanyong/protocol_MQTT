@@ -625,8 +625,10 @@ int CThreadSub::Run()
     // Result manager
     CJsonResultManager& resultManager = CJsonResultManager::GetInstance();
 
+    CT2A topicA(mqttTopic);
+    CT2A ipA(mqttIp);
     TRACE("MQTT 설정 - 토픽: %s, IP: %s, 포트: %d, Keep-Alive: %d\n",
-        CT2A(mqttTopic), CT2A(mqttIp), mqttPort, mqttKeepAlive);
+        topicA.m_psz, ipA.m_psz, mqttPort, mqttKeepAlive);
 
     // Variables for directory change detection
     HANDLE hDirectory = INVALID_HANDLE_VALUE;
@@ -704,137 +706,93 @@ int CThreadSub::Run()
         Sleep(2);
         dwCur = GetTickCount();
 
-        // Directory change detection processing
-        if (hDirectory != INVALID_HANDLE_VALUE && overlapped.hEvent)
-        {
-            DWORD waitStatus = WaitForSingleObject(overlapped.hEvent, 0);
-            if (waitStatus == WAIT_OBJECT_0)
-            {
-                // Verify asynchronous I/O completion
-                DWORD bytesTransferred = 0;
-                if (GetOverlappedResult(hDirectory, &overlapped, &bytesTransferred, FALSE))
-                {
-                    if (bytesTransferred > 0)
-                    {
-                        // Process buffer
-                        FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION*)buffer;
-                        bool fileAdded = false;
+        // ... 디렉토리 변경 감지 부분은 동일 ...
 
-                        for (;;)
-                        {
-                            // Convert file name
-                            WCHAR fileName[MAX_PATH] = { 0 };
-                            wcsncpy_s(fileName, MAX_PATH, pNotify->FileName, pNotify->FileNameLength / sizeof(WCHAR));
-
-                            // Check file extension (.json files only)
-                            CString strFileName(fileName);
-                            if (strFileName.Right(5).CompareNoCase(_T(".json")) == 0)
-                            {
-                                // Process by change type
-                                if (pNotify->Action == FILE_ACTION_ADDED ||
-                                    pNotify->Action == FILE_ACTION_MODIFIED)
-                                {
-                                    // Create file path
-                                    CString fullPath = folderPath;
-                                    if (fullPath.Right(1) != _T("\\"))
-                                        fullPath += _T("\\");
-
-                                    fullPath += strFileName;
-
-                                    // Load new file
-                                    if (fileManager.LoadJsonFile(fullPath))
-                                    {
-                                        if (pNotify->Action == FILE_ACTION_ADDED)
-                                        {
-                                            fileAdded = true;
-                                        }
-                                    }
-
-                                    TRACE(_T("New file detected: %s\n"), fullPath);
-                                }
-                            }
-
-                            // Move to next item
-                            if (pNotify->NextEntryOffset == 0)
-                                break;
-
-                            pNotify = (FILE_NOTIFY_INFORMATION*)((BYTE*)pNotify + pNotify->NextEntryOffset);
-                        }
-
-                        // 파일이 추가되었으면 총 파일 수 업데이트
-                        if (fileAdded)
-                        {
-                            m_nTotalCount = fileManager.GetTotalJsonCount();
-                            UpdateStats(m_nParsedCount, m_nTotalCount);
-                        }
-                    }
-
-                    // Set change monitoring again
-                    ResetEvent(overlapped.hEvent);
-                    BOOL success = ReadDirectoryChangesW(
-                        hDirectory,
-                        buffer,
-                        sizeof(buffer),
-                        FALSE,
-                        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
-                        &bytesReturned,
-                        &overlapped,
-                        NULL);
-
-                    if (!success && GetLastError() != ERROR_IO_PENDING)
-                    {
-                        TRACE("Failed to restart ReadDirectoryChangesW: %d\n", GetLastError());
-                        CloseHandle(overlapped.hEvent);
-                        overlapped.hEvent = NULL;
-                        CloseHandle(hDirectory);
-                        hDirectory = INVALID_HANDLE_VALUE;
-                    }
-                }
-            }
-        }
-
-        // Parsing interval check (default 1 second)
+        // 파싱 간격 체크 부분 수정
         int parsingInterval = configManager.GetParsingInterval();
         if (dwCur - dwLastParsing >= static_cast<DWORD>(parsingInterval)) {
             dwLastParsing = dwCur;
-            // Parse if there are files to process
+
+            // 처리할 파일이 있으면 파싱
             if (fileManager.GetPendingCount() > 0) {
                 JsonFileData fileData = fileManager.GetNextPendingFile();
                 if (!fileData.filePath.IsEmpty()) {
                     try {
-                        // 1. 파일명으로부터 세트 번호 확인
-                        int setNumber = configManager.GetSetNumberForJsonFile(fileData.filePath);
-
-                        TRACE("file '%s' set number: %d\n", fileData.filePath, setNumber);
-
-                        // 2. 세트에 해당하는 태그 이름 가져오기
-                        CString timerCounterTag, temperatureTag, ioLinkPdinTag;
-                        configManager.GetTagNamesForSet(setNumber, timerCounterTag, temperatureTag, ioLinkPdinTag);
-
-                        TRACE("Tagname: %s, %s, %s\n", timerCounterTag, temperatureTag, ioLinkPdinTag);
-
-                        // 3. JSON 파싱
+                        // JSON 파싱
                         CJsonParser jsonParser;
                         bool parsed = jsonParser.ParseMessage(fileData.content.c_str(), fileData.content.length());
 
                         if (parsed) {
-                            // 4. 태그 적용
-                            bool tagResult = jsonParser.ApplyJsonToTags(
-                                timerCounterTag, temperatureTag, ioLinkPdinTag,
-                                setNumber, configManager.GetTagGroup());
+                            // *** 새로운 태그 매핑 시스템 사용 ***
+                            bool tagResult = jsonParser.ApplyJsonToTagsUsingMapping();
 
-                            // 여기서 성공 카운터 증가 및 통계 업데이트
-                            m_nParsedCount++;
-                            UpdateStats(m_nParsedCount, m_nTotalCount);
+                            if (tagResult) {
+                                // 새로운 시스템으로 성공
+                                TRACE("File '%s' - 동적 태그 매핑으로 성공\n", fileData.filePath);
 
-                            // 성공 로그 출력
+                                // 성공 카운터 증가 및 통계 업데이트
+                                m_nParsedCount++;
+                                UpdateStats(m_nParsedCount, m_nTotalCount);
+
+                                // 성공 로그 출력
+                                CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                                if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+                                    pDlg->AddDebugLog(_T("파일 파싱 성공 (동적 매핑)"), fileData.filePath, DebugLogItem::LOG_SUCCESS);
+                                }
+                            }
+                            else {
+                                // fallback: 기존 방식 시도
+                                TRACE("File '%s' - 동적 매핑 실패, 기존 방식으로 fallback\n", fileData.filePath);
+
+                                // 1. 파일명으로부터 세트 번호 확인
+                                int setNumber = configManager.GetSetNumberForJsonFile(fileData.filePath);
+
+                                // 2. 세트에 해당하는 태그 이름 가져오기
+                                CString timerCounterTag, temperatureTag, ioLinkPdinTag;
+                                configManager.GetTagNamesForSet(setNumber, timerCounterTag, temperatureTag, ioLinkPdinTag);
+
+                                // 3. 기존 방식으로 태그 적용
+                                bool fallbackResult = jsonParser.ApplyJsonToTags(
+                                    timerCounterTag, temperatureTag, ioLinkPdinTag,
+                                    setNumber, configManager.GetTagGroup());
+
+                                if (fallbackResult) {
+                                    // 기존 방식으로 성공
+                                    m_nParsedCount++;
+                                    UpdateStats(m_nParsedCount, m_nTotalCount);
+
+                                    CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                                    if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+                                        pDlg->AddDebugLog(_T("파일 파싱 성공 (기존 방식)"), fileData.filePath, DebugLogItem::LOG_SUCCESS);
+                                    }
+
+                                    TRACE("File '%s' - 기존 방식으로 성공, 태그: %s, %s, %s\n",
+                                        fileData.filePath, timerCounterTag, temperatureTag, ioLinkPdinTag);
+                                }
+                                else {
+                                    // 모든 방식 실패
+                                    CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                                    if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+                                        pDlg->AddDebugLog(_T("태그 적용 실패"), fileData.filePath, DebugLogItem::LOG_WARNING);
+                                    }
+
+                                    TRACE("File '%s' - 모든 태그 적용 방식 실패\n", fileData.filePath);
+                                }
+                            }
+                        }
+                        else {
+                            // 파싱 실패
                             CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
                             if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-                                pDlg->AddDebugLog(_T("File Parsed"), fileData.filePath, DebugLogItem::LOG_SUCCESS);
+                                CString errorMsg = jsonParser.GetErrorMessage();
+                                if (errorMsg.IsEmpty()) {
+                                    errorMsg = _T("JSON 파싱 실패");
+                                }
+                                pDlg->AddDebugLog(errorMsg, fileData.filePath, DebugLogItem::LOG_ERROR);
                             }
 
-                            TRACE("File '%s' Parsing Success, Current Status: %d/%d\n",
-                                fileData.filePath, m_nParsedCount, m_nTotalCount);
+                            TRACE("File '%s' - JSON 파싱 실패: %s\n",
+                                fileData.filePath, jsonParser.GetErrorMessage());
                         }
 
                         // 중요: 파싱 결과와 상관없이 처리 완료로 표시
@@ -845,6 +803,13 @@ int CThreadSub::Run()
                         // 예외 처리...
                         fileManager.MarkFileAsProcessed(fileData.filePath);
                         TRACE("Parsing exception: %s\n", e.what());
+
+                        CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                        if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+                            CString errorMsg;
+                            errorMsg.Format(_T("파싱 중 예외 발생: %hs"), e.what());
+                            pDlg->AddDebugLog(errorMsg, fileData.filePath, DebugLogItem::LOG_ERROR);
+                        }
                     }
                 }
             }

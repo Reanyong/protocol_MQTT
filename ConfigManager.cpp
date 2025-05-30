@@ -103,6 +103,7 @@ bool CConfigManager::LoadConfig()
         }
 
         result = result && LoadTagSets();
+        result = result && LoadTagMappings();
 
         return result;
     }
@@ -171,6 +172,7 @@ bool CConfigManager::SaveConfig()
         }
 
         result = result && SaveTagSets();
+        result = result && SaveTagMappings();
 
         return result;
     }
@@ -181,6 +183,133 @@ bool CConfigManager::SaveConfig()
         return false;
     }
 }
+
+// *** 태그 매핑 관련 새로운 메서드들 구현 ***
+
+void CConfigManager::SetTagJsonPath(const CString& tagName, const CString& jsonPath)
+{
+    m_tagMappings[tagName] = jsonPath;
+    TRACE("태그 매핑 설정: %s -> %s\n", tagName, jsonPath);
+}
+
+CString CConfigManager::GetJsonPathForTag(const CString& tagName) const
+{
+    auto it = m_tagMappings.find(tagName);
+    if (it != m_tagMappings.end()) {
+        return it->second;
+    }
+    return _T("");
+}
+
+std::map<CString, CString> CConfigManager::GetAllTagMappings() const
+{
+    return m_tagMappings;
+}
+
+bool CConfigManager::LoadTagMappings()
+{
+    try {
+        m_tagMappings.clear();
+
+        // INI 파일에서 [TagMapping] 섹션 읽기
+        TCHAR szSection[8192] = { 0 };
+        DWORD dwRet = GetPrivateProfileSection(_T("TagMapping"), szSection,
+            sizeof(szSection) / sizeof(TCHAR), m_iniFilePath);
+
+        if (dwRet > 0) {
+            TCHAR* pStart = szSection;
+            while (*pStart) {
+                CString strLine = pStart;
+                int nPos = strLine.Find('=');
+                if (nPos > 0) {
+                    CString tagName = strLine.Left(nPos);
+                    CString jsonPath = strLine.Mid(nPos + 1);
+
+                    tagName.Trim();
+                    jsonPath.Trim();
+
+                    if (!tagName.IsEmpty() && !jsonPath.IsEmpty()) {
+                        m_tagMappings[tagName] = jsonPath;
+                        TRACE("태그 매핑 로드: %s -> %s\n", tagName, jsonPath);
+                    }
+                }
+                pStart += strLine.GetLength() + 1;
+            }
+        }
+
+        // 태그 매핑이 없으면 기본값 생성
+        if (m_tagMappings.empty()) {
+            CreateDefaultTagMappings();
+            SaveTagMappings(); // 기본값을 INI에 저장
+        }
+
+        TRACE("총 %d개의 태그 매핑을 로드했습니다.\n", m_tagMappings.size());
+        return true;
+    }
+    catch (const std::exception& e) {
+        OutputDebugStringW(L"태그 매핑 로드 오류: ");
+        OutputDebugStringA(e.what());
+        OutputDebugStringW(L"\n");
+        return false;
+    }
+}
+
+bool CConfigManager::SaveTagMappings()
+{
+    try {
+        // 기존 [TagMapping] 섹션 삭제
+        WritePrivateProfileString(_T("TagMapping"), NULL, NULL, m_iniFilePath);
+
+        // 새로운 태그 매핑 저장
+        for (const auto& pair : m_tagMappings) {
+            WritePrivateProfileString(_T("TagMapping"), pair.first, pair.second, m_iniFilePath);
+            TRACE("태그 매핑 저장: %s -> %s\n", pair.first, pair.second);
+        }
+
+        TRACE("총 %d개의 태그 매핑을 저장했습니다.\n", m_tagMappings.size());
+        return true;
+    }
+    catch (const std::exception& e) {
+        OutputDebugStringW(L"태그 매핑 저장 오류: ");
+        OutputDebugStringA(e.what());
+        OutputDebugStringW(L"\n");
+        return false;
+    }
+}
+
+void CConfigManager::CreateDefaultTagMappings()
+{
+    // 기본 태그 매핑 설정
+    m_tagMappings[_T("TIMER_COUNTER")] = _T("$.data.payload./timer[1]/counter.data");
+    m_tagMappings[_T("TEMPERATURE")] = _T("$.data.payload./processdatamaster/temperature.data");
+    m_tagMappings[_T("IOLINK_PDIN")] = _T("$.data.payload./iolinkmaster/port[2]/iolinkdevice/pdin.data");
+
+    // 기본적인 JSON 필드들
+    m_tagMappings[_T("MY_CUSTOM_TAG")] = _T("$.code");
+    m_tagMappings[_T("ANOTHER_TAG")] = _T("$.cid");
+
+    // 다른 형태의 JSON을 위한 예시
+    m_tagMappings[_T("SIMPLE_VALUE")] = _T("$.data.value");
+    m_tagMappings[_T("SIMPLE_CODE")] = _T("$.code");
+
+    TRACE("기본 태그 매핑을 생성했습니다.\n");
+}
+
+void CConfigManager::RemoveTagMapping(const CString& tagName)
+{
+    auto it = m_tagMappings.find(tagName);
+    if (it != m_tagMappings.end()) {
+        m_tagMappings.erase(it);
+        TRACE("태그 매핑 삭제: %s\n", tagName);
+    }
+}
+
+bool CConfigManager::HasTagMapping(const CString& tagName) const
+{
+    return m_tagMappings.find(tagName) != m_tagMappings.end();
+}
+
+// 기존 메서드들은 그대로 유지...
 
 void CConfigManager::SetJsonFolderPath(const CString& folderPath)
 {
@@ -244,13 +373,11 @@ CString CConfigManager::GetTagGroup() const
     return m_tagGroup;
 }
 
-// 태그 그룹 setter
 void CConfigManager::SetTagGroup(const CString& tagGroup)
 {
     m_tagGroup = tagGroup;
 }
 
-// 세트 번호로 JSON 파일 이름 가져오기
 CString CConfigManager::GetJsonFileForSet(int setNumber) const
 {
     auto it = m_setToJsonFile.find(setNumber);
@@ -260,17 +387,14 @@ CString CConfigManager::GetJsonFileForSet(int setNumber) const
     return _T("");
 }
 
-// JSON 파일명으로 세트 번호 가져오기
 int CConfigManager::GetSetNumberForJsonFile(const CString& jsonFileName) const
 {
-    // 파일명에서 경로 제거
     CString fileName = jsonFileName;
     int pos = fileName.ReverseFind('\\');
     if (pos >= 0) {
         fileName = fileName.Mid(pos + 1);
     }
 
-    // JSON 확장자 추가 (.json이 없다면)
     if (fileName.Right(5).CompareNoCase(_T(".json")) != 0) {
         fileName += _T(".json");
     }
@@ -279,33 +403,28 @@ int CConfigManager::GetSetNumberForJsonFile(const CString& jsonFileName) const
     if (it != m_jsonFileToSet.end()) {
         return it->second;
     }
-    return 0; // 0은 유효하지 않은 세트 번호
+    return 0;
 }
 
-// 세트 번호로 태그 이름 생성
 void CConfigManager::GetTagNamesForSet(int setNumber, CString& timerCounterTag,
     CString& temperatureTag, CString& ioLinkPdinTag) const
 {
     if (setNumber == 1) {
-        // 기본 태그 이름
         timerCounterTag = _T("TIMER_COUNTER");
         temperatureTag = _T("TEMPERATURE");
         ioLinkPdinTag = _T("IOLINK_PDIN");
     }
     else {
-        // 세트 번호를 붙인 태그 이름
         timerCounterTag.Format(_T("TIMER_COUNTER%d"), setNumber);
         temperatureTag.Format(_T("TEMPERATURE%d"), setNumber);
         ioLinkPdinTag.Format(_T("IOLINK_PDIN%d"), setNumber);
     }
 }
 
-// 태그셋 추가
 void CConfigManager::AddTagSet(int setNumber, const CString& jsonFileName)
 {
     if (setNumber <= 0) return;
 
-    // JSON 확장자 추가 (.json이 없다면)
     CString fileName = jsonFileName;
     if (fileName.Right(5).CompareNoCase(_T(".json")) != 0) {
         fileName += _T(".json");
@@ -315,7 +434,6 @@ void CConfigManager::AddTagSet(int setNumber, const CString& jsonFileName)
     m_jsonFileToSet[fileName] = setNumber;
 }
 
-// 태그셋 삭제
 void CConfigManager::RemoveTagSet(int setNumber)
 {
     auto it = m_setToJsonFile.find(setNumber);
@@ -327,18 +445,14 @@ void CConfigManager::RemoveTagSet(int setNumber)
 
 bool CConfigManager::LoadTagSets()
 {
-    // 이미 LoadConfig()에서 모든 작업을 수행하므로 여기서는 항상 성공 반환
     return true;
 }
 
-// 태그셋 저장 (별도 메서드로 분리)
 bool CConfigManager::SaveTagSets()
 {
-    // 이미 SaveConfig()에서 모든 작업을 수행하므로 여기서는 항상 성공 반환
     return true;
 }
 
-// 태그셋 개수 반환
 int CConfigManager::GetTagSetCount() const
 {
     return static_cast<int>(m_setToJsonFile.size());

@@ -62,6 +62,26 @@ public:
     // 태그셋 개수 반환
     int GetTagSetCount() const;
 
+    // 태그 매핑 설정/조회
+    void SetTagJsonPath(const CString& tagName, const CString& jsonPath);
+    CString GetJsonPathForTag(const CString& tagName) const;
+
+    // 모든 태그 매핑 조회
+    std::map<CString, CString> GetAllTagMappings() const;
+
+    // 태그 매핑 로드/저장
+    bool LoadTagMappings();
+    bool SaveTagMappings();
+
+    // 기본 태그 매핑 생성
+    void CreateDefaultTagMappings();
+
+    // 태그 매핑 삭제
+    void RemoveTagMapping(const CString& tagName);
+
+    // 태그 매핑 존재 여부 확인
+    bool HasTagMapping(const CString& tagName) const;
+
 private:
     CString m_jsonFolderPath;
     FileSortMethod m_sortMethod;
@@ -83,6 +103,9 @@ private:
     CString m_mqttIp;
     int m_mqttPort;
     int m_mqttKeepAlive;
+
+    // *** 새로 추가된 멤버 변수 ***
+    std::map<CString, CString> m_tagMappings;  // 태그명 -> JSONPath 매핑
 
 public:
     // MQTT Config Get & Set
