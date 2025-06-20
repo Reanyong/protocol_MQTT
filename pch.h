@@ -7,8 +7,25 @@
 #ifndef PCH_H
 #define PCH_H
 
-// 여기에 미리 컴파일하려는 헤더 추가
+// 프레임워크 헤더를 여기에 추가합니다.
 #include "framework.h"
+
+// 성능 최적화: 자주 사용되는 헤더들을 pch에 포함
+#include <vector>
+#include <map>
+#include <string>
+#include <mutex>
+#include <deque>
+#include <memory>
+#include <algorithm>
+
+// JSON 라이브러리
+#include "json.hpp"
+
+// Windows API 최적화
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 
 #include "..\include\EVStruct.h"
 #include "..\Include\EVCommLib.h"

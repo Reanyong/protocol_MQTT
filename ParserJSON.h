@@ -92,6 +92,23 @@ public:
     bool GetValueByPath(const CString& jsonPath, int& outValue) const;
     bool GetValueByPath(const CString& jsonPath, double& outValue) const;
 
+    // *** Phase 1: MQTT 토픽 기반 처리 메서드들 ***
+
+    // 특정 MQTT 토픽에 대한 모든 태그 매핑 적용
+    bool ApplyTopicBasedMapping(const CString& topic) const;
+
+    // MQTT 토픽에 매핑된 태그들 적용 (새로 추가)
+    bool ApplyMqttTagMapping(const CString& mqttTopic) const;
+
+    // JSONPath로 값 추출 (동적 경로 지원)
+    bool ExtractValueByJSONPath(const CString& jsonPath, CString& outValue) const;
+
+    // 태그에 직접 값 설정 (검증 없이 빠른 처리)
+    bool SetTagValueDirect(const CString& tagName, const CString& value) const;
+
+    // JSON 경로에서 배열 인덱스 처리 (/path[1], /path[2] 등)
+    bool ExtractArrayValueByPath(const CString& jsonPath, CString& outValue) const;
+
 private:
     EventData m_eventData;
     bool m_isValid;             // 유효성 검사 결과

@@ -48,23 +48,6 @@ public:
 	// 파싱 통계 함수
 	void UpdateStats(int parsedCount, int totalCount);
 
-	void InitializeFileProcessing();
-
-private:
-	HANDLE m_hChangeNotification;    // 디렉토리 변경 알림 핸들
-	OVERLAPPED m_overlapped;         // 비동기 I/O용 OVERLAPPED 구조체
-	char m_buffer[8192];             // 변경 정보를 저장할 버퍼
-	DWORD m_bytesReturned;           // 반환된 바이트 수
-	HANDLE m_directoryHandle;        // 디렉토리 핸들
-	bool m_bWatchDirectory;          // 디렉토리 감시 활성화 플래그
-
-	bool IsValidJsonFile(const CString& filePath);
-
-public:
-	bool StartDirectoryWatch(const CString& folderPath);
-	void StopDirectoryWatch();
-	void ProcessDirectoryChanges();
-
 	int m_nParsedCount;   // 파싱 성공 파일 수
 	int m_nTotalCount;    // 총 JSON 파일 수
 
@@ -75,6 +58,7 @@ protected:
 	//{{AFX_MSG(CThreadSub)
 		// NOTE - the ClassWizard will add and remove member functions here.
 	//}}AFX_MSG
+
 	DECLARE_MESSAGE_MAP()
 };
 

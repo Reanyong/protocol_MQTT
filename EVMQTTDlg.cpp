@@ -3,6 +3,7 @@
 #include "EVMQTT.h"
 #include "EVMQTTDlg.h"
 #include "afxdialogex.h"
+#include "ConfigManager.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -231,10 +232,8 @@ void CEVMQTTDlg::BeginThreadSub()
 			THREAD_PRIORITY_HIGHEST, 0, CREATE_SUSPENDED);
 		m_pThreadSub->m_pOwner = this;
 
-		// 스레드 시작 전 초기화 작업 실행
-		m_pThreadSub->InitializeFileProcessing();
-
-		m_nTotalCount = m_pThreadSub->m_nTotalCount;
+		// 초기 통계 설정
+		m_nTotalCount = 0;
 		UpdateParsingStats(m_nParsedCount, m_nTotalCount);
 
 		// 스레드 시작
@@ -280,6 +279,8 @@ void CEVMQTTDlg::DeleteThreadSub()
 			int n = 0;
 			DWORD dwExitCode;
 			m_pThreadSub->Stop();
+			
+			// 성능 최적화: 적응형 대기시간과 더 빠른 종료
 			while (true)
 			{
 				if (GetExitCodeThread(m_pThreadSub->m_hThread, &dwExitCode))
@@ -288,11 +289,14 @@ void CEVMQTTDlg::DeleteThreadSub()
 						break;
 				}
 				else break;
-				Sleep(10);
+				
+				// 적응형 대기: 처음엔 짧게, 점점 길게
+				int sleepTime = (n < 10) ? 1 : (n < 50) ? 5 : 10;
+				Sleep(sleepTime);
 
 				n++;
 
-				if (n > 500)
+				if (n > 200)  // 최대 대기시간 단축 (500 -> 200)
 					break;
 			}
 

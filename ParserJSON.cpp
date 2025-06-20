@@ -20,9 +20,8 @@ CJsonParser::~CJsonParser()
 bool CJsonParser::ParseMessage(const char* payload, int length)
 {
     try {
-        // 문자열로부터 JSON 파싱
-        std::string jsonStr(payload, length);
-        m_jsonData = nlohmann::json::parse(jsonStr);
+        // 성능 최적화: string 생성 없이 직접 파싱
+        m_jsonData = nlohmann::json::parse(payload, payload + length);
 
         m_parseStatus = PARSE_SUCCESS;  // 초기값은 성공으로 설정
         m_errorMessage = _T("");
@@ -81,14 +80,62 @@ bool CJsonParser::ApplyJsonToTagsUsingMapping() const
         if (ApplyValueToTag(tagName, jsonPath)) {
             successCount++;
             anySuccess = true;
-            TRACE("태그 적용 성공: %s <- %s\n", tagName, jsonPath);
+            TRACE("태그 적용 성공: %S <- %S\n", (LPCTSTR)tagName, (LPCTSTR)jsonPath);
         }
         else {
-            TRACE("태그 적용 실패: %s <- %s\n", tagName, jsonPath);
+            TRACE("태그 적용 실패: %S <- %S\n", (LPCTSTR)tagName, (LPCTSTR)jsonPath);
         }
     }
 
     TRACE("태그 매핑 결과: %d/%d 성공\n", successCount, totalCount);
+    return anySuccess;
+}
+
+bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
+{
+    if (!m_isValid) {
+        return false;
+    }
+
+    CConfigManager& configManager = CConfigManager::GetInstance();
+    std::map<CString, CString> allTagMappings = configManager.GetAllTagMappings();
+
+    bool anySuccess = false;
+    int successCount = 0;
+    int totalCount = 0;
+
+    TRACE("Processing MQTT topic: %S\n", (LPCTSTR)mqttTopic);
+
+    for (const auto& mapping : allTagMappings) {
+        const CString& tagName = mapping.first;
+        const CString& mappingValue = mapping.second;  // "토픽,JSONPath" 형식
+
+        // 매핑 값을 토픽과 JSONPath로 분리
+        int commaPos = mappingValue.Find(_T(","));
+        if (commaPos == -1) {
+            continue; // 잘못된 형식
+        }
+
+        CString topic = mappingValue.Left(commaPos);
+        CString jsonPath = mappingValue.Mid(commaPos + 1);
+
+        // 토픽이 일치하는 경우만 처리
+        if (topic.CompareNoCase(mqttTopic) == 0) {
+            totalCount++;
+            if (ApplyValueToTag(tagName, jsonPath)) {
+                successCount++;
+                anySuccess = true;
+                TRACE("Tag mapping success: %S <- %S,%S\n", 
+                    (LPCTSTR)tagName, (LPCTSTR)topic, (LPCTSTR)jsonPath);
+            }
+            else {
+                TRACE("Tag mapping failed: %S <- %S,%S\n", 
+                    (LPCTSTR)tagName, (LPCTSTR)topic, (LPCTSTR)jsonPath);
+            }
+        }
+    }
+
+    TRACE("MQTT tag mapping result: %d/%d success\n", successCount, totalCount);
     return anySuccess;
 }
 
