@@ -1,16 +1,15 @@
 ﻿#include "pch.h"
 #include "ParserJSON.h"
 #include "ConfigManager.h"
-#include "JsonPathUtil.h"  // JsonPathUtil.h 대신 JsonUtil.h 사용
-#include "ErrorMessages.h"
+#include "JsonPathUtil.h"
 #include <sstream>
 #include <string>
 
 CJsonParser::CJsonParser()
 {
-    m_isValid = false;
-    m_parseStatus = PARSE_SUCCESS;
-    m_errorMessage = _T("");
+	m_isValid = false;
+	m_parseStatus = PARSE_SUCCESS;
+	m_errorMessage = _T("");
 }
 
 CJsonParser::~CJsonParser()
@@ -19,573 +18,341 @@ CJsonParser::~CJsonParser()
 
 bool CJsonParser::ParseMessage(const char* payload, int length)
 {
-    try {
-        // 성능 최적화: string 생성 없이 직접 파싱
-        m_jsonData = nlohmann::json::parse(payload, payload + length);
-
-        m_parseStatus = PARSE_SUCCESS;  // 초기값은 성공으로 설정
-        m_errorMessage = _T("");
-        m_isValid = true;
-
-        // 기존 EventData 구조체도 채우기 (하위 호환성을 위해)
-        /*FillEventDataFromJson();*/
-
-        return true;
-    }
-    catch (const nlohmann::json::parse_error& e) {
-        // JSON 파싱 오류
-        m_parseStatus = PARSE_JSON_ERROR;
-        m_errorMessage.Format(_T("JSON 파싱 오류: %hs"), e.what());
-        m_isValid = false;
-        TRACE("JSON 파싱 오류: %s\n", e.what());
-        return false;
-    }
-    catch (const nlohmann::json::type_error& e) {
-        // JSON 타입 오류
-        m_parseStatus = PARSE_TYPE_ERROR;
-        m_errorMessage.Format(_T("JSON 타입 오류: %hs"), e.what());
-        m_isValid = false;
-        TRACE("JSON 타입 오류: %s\n", e.what());
-        return false;
-    }
-    catch (const std::exception& e) {
-        // 기타 예외
-        m_parseStatus = PARSE_JSON_ERROR;
-        m_errorMessage.Format(_T("예외 발생: %hs"), e.what());
-        m_isValid = false;
-        TRACE("예외 발생: %s\n", e.what());
-        return false;
-    }
-}
-
-// *** 새로운 메서드들 구현 ***
-
-bool CJsonParser::ApplyJsonToTagsUsingMapping() const
-{
-    if (!m_isValid) {
-        return false;
-    }
-
-    CConfigManager& configManager = CConfigManager::GetInstance();
-    std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
-
-    bool anySuccess = false;
-    int successCount = 0;
-    int totalCount = tagMappings.size();
-
-    for (const auto& mapping : tagMappings) {
-        const CString& tagName = mapping.first;
-        const CString& jsonPath = mapping.second;
-
-        if (ApplyValueToTag(tagName, jsonPath)) {
-            successCount++;
-            anySuccess = true;
-            TRACE("태그 적용 성공: %S <- %S\n", (LPCTSTR)tagName, (LPCTSTR)jsonPath);
-        }
-        else {
-            TRACE("태그 적용 실패: %S <- %S\n", (LPCTSTR)tagName, (LPCTSTR)jsonPath);
-        }
-    }
-
-    TRACE("태그 매핑 결과: %d/%d 성공\n", successCount, totalCount);
-    return anySuccess;
+	try {
+		m_jsonData = nlohmann::json::parse(payload, payload + length);
+		m_parseStatus = PARSE_SUCCESS;
+		m_errorMessage = _T("");
+		m_isValid = true;
+		return true;
+	}
+	catch (const nlohmann::json::parse_error& e) {
+		m_parseStatus = PARSE_JSON_ERROR;
+		m_errorMessage.Format(_T("JSON 파싱 오류: %hs"), e.what());
+		m_isValid = false;
+		TRACE("JSON 파싱 오류: %s\n", e.what());
+		return false;
+	}
+	catch (const std::exception& e) {
+		m_parseStatus = PARSE_JSON_ERROR;
+		m_errorMessage.Format(_T("예외 발생: %hs"), e.what());
+		m_isValid = false;
+		TRACE("예외 발생: %s\n", e.what());
+		return false;
+	}
 }
 
 bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 {
-    if (!m_isValid) {
-        return false;
-    }
+	if (!m_isValid) {
+		TRACE("JSON 데이터가 유효하지 않음\n");
+		return false;
+	}
 
-    CConfigManager& configManager = CConfigManager::GetInstance();
-    std::map<CString, CString> allTagMappings = configManager.GetAllTagMappings();
+	TRACE("=== MQTT 토픽별 태그 매핑 적용 시작 ===\n");
+	TRACE("받은 MQTT 토픽: %S\n", (LPCTSTR)mqttTopic);
 
-    bool anySuccess = false;
-    int successCount = 0;
-    int totalCount = 0;
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
 
-    TRACE("Processing MQTT topic: %S\n", (LPCTSTR)mqttTopic);
+	if (tagMappings.empty()) {
+		TRACE("태그 매핑이 비어있습니다.\n");
+		return false;
+	}
 
-    for (const auto& mapping : allTagMappings) {
-        const CString& tagName = mapping.first;
-        const CString& mappingValue = mapping.second;  // "토픽,JSONPath" 형식
+	bool anySuccess = false;
+	int successCount = 0;
+	int totalCount = 0;
+	int skippedCount = 0;
 
-        // 매핑 값을 토픽과 JSONPath로 분리
-        int commaPos = mappingValue.Find(_T(","));
-        if (commaPos == -1) {
-            continue; // 잘못된 형식
-        }
+	for (const auto& mapping : tagMappings) {
+		const CString& tagName = mapping.first;
+		const CString& tagMapping = mapping.second;
 
-        CString topic = mappingValue.Left(commaPos);
-        CString jsonPath = mappingValue.Mid(commaPos + 1);
+		// 토픽과 JSONPath 분리
+		CString configuredTopic, jsonPath;
+		int commaPos = tagMapping.Find(_T(","));
+		if (commaPos > 0) {
+			configuredTopic = tagMapping.Left(commaPos);
+			jsonPath = tagMapping.Mid(commaPos + 1);
+			configuredTopic.Trim();
+			jsonPath.Trim();
+		}
+		else {
+			configuredTopic = _T("+");  // 모든 토픽 허용
+			jsonPath = tagMapping;
+			jsonPath.Trim();
+		}
 
-        // 토픽이 일치하는 경우만 처리
-        if (topic.CompareNoCase(mqttTopic) == 0) {
-            totalCount++;
-            if (ApplyValueToTag(tagName, jsonPath)) {
-                successCount++;
-                anySuccess = true;
-                TRACE("Tag mapping success: %S <- %S,%S\n", 
-                    (LPCTSTR)tagName, (LPCTSTR)topic, (LPCTSTR)jsonPath);
-            }
-            else {
-                TRACE("Tag mapping failed: %S <- %S,%S\n", 
-                    (LPCTSTR)tagName, (LPCTSTR)topic, (LPCTSTR)jsonPath);
-            }
-        }
-    }
+		totalCount++;
 
-    TRACE("MQTT tag mapping result: %d/%d success\n", successCount, totalCount);
-    return anySuccess;
+		// 토픽 필터링
+		if (configuredTopic != _T("+") && configuredTopic.CompareNoCase(mqttTopic) != 0) {
+			TRACE("토픽 불일치로 건너뜀: 태그=%S, 설정토픽=%S, 수신토픽=%S\n",
+				(LPCTSTR)tagName, (LPCTSTR)configuredTopic, (LPCTSTR)mqttTopic);
+			skippedCount++;
+			continue;
+		}
+
+		TRACE("\n--- 태그 처리 ---\n");
+		TRACE("태그명: %S\n", (LPCTSTR)tagName);
+		TRACE("설정 토픽: %S\n", (LPCTSTR)configuredTopic);
+		TRACE("JSONPath: %S\n", (LPCTSTR)jsonPath);
+
+		// EasyView 태그 존재 여부 확인
+		ST_EV_TAG_INFO tagInfo;
+		if (EV_GetTagInfo(tagName, &tagInfo) <= 0) {
+			TRACE("EasyView에서 태그를 찾을 수 없음: %S\n", (LPCTSTR)tagName);
+			continue;
+		}
+
+		// JSONPath로 값 추출 및 태그에 적용
+		if (ApplyValueToTagOptimized(tagName, jsonPath)) {
+			successCount++;
+			anySuccess = true;
+			TRACE("태그 적용 성공: %S\n", (LPCTSTR)tagName);
+		}
+		else {
+			TRACE("태그 적용 실패: %S\n", (LPCTSTR)tagName);
+		}
+	}
+
+	TRACE("\n=== MQTT 태그 매핑 결과 ===\n");
+	TRACE("전체 매핑: %d개\n", totalCount);
+	TRACE("토픽 불일치로 건너뜀: %d개\n", skippedCount);
+	TRACE("처리 시도: %d개\n", totalCount - skippedCount);
+	TRACE("성공: %d개\n", successCount);
+	TRACE("최종 결과: %s\n", anySuccess ? "성공" : "실패");
+
+	return anySuccess;
 }
 
-bool CJsonParser::ApplyValueToTag(const CString& tagName, const CString& jsonPath) const
+bool CJsonParser::ApplyValueToTagOptimized(const CString& tagName, const CString& jsonPath) const
 {
-    if (!m_isValid) {
-        return false;
-    }
+	try {
+		// JSONPath로 원시 JSON 값 추출
+		std::vector<std::string> pathTokens = CJsonPathUtil::ParseJsonPath(jsonPath);
+		if (pathTokens.empty()) {
+			TRACE("JSONPath 파싱 실패: %S\n", (LPCTSTR)jsonPath);
+			return false;
+		}
 
-    try {
-        // JSONPath로 값 추출
-        CString strValue;
-        if (CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, strValue)) {
-            return ApplyValueToEasyViewTag(tagName, strValue);
-        }
+		TRACE("JSONPath 토큰 개수: %d\n", pathTokens.size());
+		for (size_t i = 0; i < pathTokens.size(); i++) {
+			TRACE("  토큰[%d]: %s\n", i, pathTokens[i].c_str());
+		}
 
-        // 문자열 추출이 실패하면 숫자로 시도
-        double numValue;
-        if (CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, numValue)) {
-            return ApplyValueToEasyViewTag(tagName, numValue);
-        }
+		const nlohmann::json* pValue = CJsonPathUtil::NavigateToValue(m_jsonData, pathTokens);
+		if (!pValue) {
+			TRACE("JSONPath로 값을 찾을 수 없음: %S\n", (LPCTSTR)jsonPath);
 
-        return false;
-    }
-    catch (const std::exception& e) {
-        TRACE("태그 값 적용 오류: %s\n", e.what());
-        return false;
-    }
+			// JSON 구조 출력 (디버깅용)
+			try {
+				std::string jsonStr = m_jsonData.dump(2);
+				TRACE("현재 JSON 구조:\n%s\n", jsonStr.c_str());
+			}
+			catch (...) {
+				TRACE("JSON 구조 출력 실패\n");
+			}
+
+			return false;
+		}
+
+		TRACE("JSONPath로 값 추출 성공\n");
+
+		// 추출된 값의 타입과 내용 출력
+		if (pValue->is_string()) {
+			TRACE("추출된 값 (문자열): %s\n", pValue->get<std::string>().c_str());
+		}
+		else if (pValue->is_number()) {
+			TRACE("추출된 값 (숫자): %f\n", pValue->get<double>());
+		}
+		else if (pValue->is_boolean()) {
+			TRACE("추출된 값 (불린): %s\n", pValue->get<bool>() ? "true" : "false");
+		}
+		else {
+			TRACE("추출된 값 (기타): %s\n", pValue->dump().c_str());
+		}
+
+		// EasyView 태그 정보 조회
+		ST_EV_TAG_INFO tagInfo;
+		int tagResult = EV_GetTagInfo(tagName, &tagInfo);
+		if (tagResult <= 0) {
+			TRACE("태그를 찾을 수 없음: %S (결과: %d)\n", (LPCTSTR)tagName, tagResult);
+			return false;
+		}
+
+		TRACE("태그 정보 - 타입: %d, Station: %d, Position: %d\n",
+			tagInfo.nTagType, tagInfo.nStnPos, tagInfo.nTagPos);
+
+		// JSON 값 타입에 따른 최적화된 처리
+		switch (tagInfo.nTagType) {
+		case TYPE_DI:
+		case TYPE_DO:
+			return ApplyDigitalValue(tagInfo, *pValue);
+
+		case TYPE_AI:
+		case TYPE_AO:
+			return ApplyAnalogValue(tagInfo, *pValue);
+
+		case TYPE_SI:
+			return ApplyStringValue(tagInfo, *pValue);
+
+		default:
+			TRACE("지원하지 않는 태그 타입: %d\n", tagInfo.nTagType);
+			return false;
+		}
+	}
+	catch (const std::exception& e) {
+		TRACE("태그 값 설정 중 예외 발생: %s\n", e.what());
+		return false;
+	}
 }
 
-bool CJsonParser::ApplyAllMappedTags() const
+bool CJsonParser::ApplyDigitalValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const
 {
-    return ApplyJsonToTagsUsingMapping();
+	int digitalValue = 0;
+
+	if (jsonValue.is_boolean()) {
+		digitalValue = jsonValue.get<bool>() ? 1 : 0;
+	}
+	else if (jsonValue.is_number()) {
+		digitalValue = (jsonValue.get<double>() != 0.0) ? 1 : 0;
+	}
+	else if (jsonValue.is_string()) {
+		std::string strValue = jsonValue.get<std::string>();
+		if (strValue == "true" || strValue == "1" || strValue == "on") {
+			digitalValue = 1;
+		}
+		else if (strValue == "false" || strValue == "0" || strValue == "off") {
+			digitalValue = 0;
+		}
+		else {
+			try {
+				digitalValue = (std::stod(strValue) != 0.0) ? 1 : 0;
+			}
+			catch (...) {
+				digitalValue = 0;
+			}
+		}
+	}
+	else {
+		TRACE("디지털 태그에 적용할 수 없는 JSON 값 타입\n");
+		return false;
+	}
+
+	int result = EV_PutSBDiValue(tagInfo.nStnPos, tagInfo.nTagPos, digitalValue);
+	TRACE("DI/DO 태그 적용 결과: %d (값: %d)\n", result, digitalValue);
+	return result > 0;
+}
+
+bool CJsonParser::ApplyAnalogValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const
+{
+	double analogValue = 0.0;
+
+	if (jsonValue.is_number()) {
+		analogValue = jsonValue.get<double>();
+	}
+	else if (jsonValue.is_string()) {
+		std::string strValue = jsonValue.get<std::string>();
+
+		try {
+			// 16진수 처리
+			if (strValue.length() > 2 && (strValue.substr(0, 2) == "0x" || strValue.substr(0, 2) == "0X")) {
+				unsigned int hexValue = 0;
+				if (sscanf_s(strValue.c_str(), "%x", &hexValue) == 1) {
+					analogValue = static_cast<double>(hexValue);
+				}
+				else {
+					TRACE("16진수 변환 실패: %s\n", strValue.c_str());
+					return false;
+				}
+			}
+			// 일반 16진수 (A-F 포함)
+			else if (strValue.find_first_of("ABCDEFabcdef") != std::string::npos &&
+				strValue.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos) {
+				unsigned int hexValue = 0;
+				if (sscanf_s(strValue.c_str(), "%x", &hexValue) == 1) {
+					analogValue = static_cast<double>(hexValue);
+				}
+				else {
+					TRACE("16진수 변환 실패: %s\n", strValue.c_str());
+					return false;
+				}
+			}
+			// 10진수 처리
+			else {
+				analogValue = std::stod(strValue);
+			}
+		}
+		catch (const std::exception& e) {
+			TRACE("아날로그 값 변환 실패: %s (%s)\n", strValue.c_str(), e.what());
+			return false;
+		}
+	}
+	else if (jsonValue.is_boolean()) {
+		analogValue = jsonValue.get<bool>() ? 1.0 : 0.0;
+	}
+	else {
+		TRACE("아날로그 태그에 적용할 수 없는 JSON 값 타입\n");
+		return false;
+	}
+
+	int result = EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, analogValue);
+	TRACE("AI/AO 태그 적용 결과: %d (값: %f)\n", result, analogValue);
+	return result > 0;
+}
+
+bool CJsonParser::ApplyStringValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const
+{
+	std::string stringValue;
+
+	if (jsonValue.is_string()) {
+		stringValue = jsonValue.get<std::string>();
+	}
+	else if (jsonValue.is_number()) {
+		if (jsonValue.is_number_integer()) {
+			stringValue = std::to_string(jsonValue.get<int>());
+		}
+		else {
+			stringValue = std::to_string(jsonValue.get<double>());
+		}
+	}
+	else if (jsonValue.is_boolean()) {
+		stringValue = jsonValue.get<bool>() ? "true" : "false";
+	}
+	else if (jsonValue.is_null()) {
+		stringValue = "";
+	}
+	else {
+		stringValue = jsonValue.dump();
+	}
+
+	int result = EV_PutSBString(tagInfo.nStnPos, tagInfo.nTagPos * 2,
+		stringValue.c_str(), stringValue.length());
+	TRACE("SI 태그 적용 결과: %d (값: %s)\n", result, stringValue.c_str());
+	return result > 0;
 }
 
 bool CJsonParser::GetValueByPath(const CString& jsonPath, CString& outValue) const
 {
-    if (!m_isValid) {
-        return false;
-    }
-
-    return CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, outValue);
+	if (!m_isValid) {
+		return false;
+	}
+	return CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, outValue);
 }
 
 bool CJsonParser::GetValueByPath(const CString& jsonPath, int& outValue) const
 {
-    if (!m_isValid) {
-        return false;
-    }
-
-    return CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, outValue);
+	if (!m_isValid) {
+		return false;
+	}
+	return CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, outValue);
 }
 
 bool CJsonParser::GetValueByPath(const CString& jsonPath, double& outValue) const
 {
-    if (!m_isValid) {
-        return false;
-    }
-
-    return CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, outValue);
-}
-
-bool CJsonParser::ApplyValueToEasyViewTag(const CString& tagName, const CString& value) const
-{
-    ST_EV_TAG_INFO tagInfo;
-    if (EV_GetTagInfo(tagName, &tagInfo) <= 0) {
-        TRACE("태그를 찾을 수 없음: %s\n", tagName);
-        return false;
-    }
-
-    try {
-        switch (tagInfo.nTagType) {
-        case TYPE_DI:
-        case TYPE_DO:
-        {
-            // 문자열을 논리값으로 변환
-            int boolValue = 0;
-            if (value.CompareNoCase(_T("true")) == 0 || value == _T("1")) {
-                boolValue = 1;
-            }
-            else if (value.CompareNoCase(_T("false")) == 0 || value == _T("0")) {
-                boolValue = 0;
-            }
-            else {
-                // 숫자로 변환 시도
-                boolValue = _ttoi(value) ? 1 : 0;
-            }
-            EV_PutSBDiValue(tagInfo.nStnPos, tagInfo.nTagPos, boolValue);
-            TRACE("DI/DO 태그 적용: %s = %d\n", tagName, boolValue);
-            return true;
-        }
-        case TYPE_AI:
-        case TYPE_AO:
-        {
-            double numValue = _ttof(value);
-            EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, numValue);
-            TRACE("AI/AO 태그 적용: %s = %f\n", tagName, numValue);
-            return true;
-        }
-        case TYPE_SI:
-        {
-            CT2A utf8Value(value, CP_UTF8);
-            EV_PutSBString(tagInfo.nStnPos, tagInfo.nTagPos * 2,
-                utf8Value, strlen(utf8Value));
-            TRACE("SI 태그 적용: %s = %s\n", tagName, value);
-            return true;
-        }
-        default:
-            TRACE("지원하지 않는 태그 타입: %s (타입: %d)\n", tagName, tagInfo.nTagType);
-            return false;
-        }
-    }
-    catch (const std::exception& e) {
-        TRACE("태그 값 설정 오류: %s\n", e.what());
-        return false;
-    }
-}
-
-bool CJsonParser::ApplyValueToEasyViewTag(const CString& tagName, int value) const
-{
-    ST_EV_TAG_INFO tagInfo;
-    if (EV_GetTagInfo(tagName, &tagInfo) <= 0) {
-        TRACE("태그를 찾을 수 없음: %s\n", tagName);
-        return false;
-    }
-
-    try {
-        switch (tagInfo.nTagType) {
-        case TYPE_DI:
-        case TYPE_DO:
-            EV_PutSBDiValue(tagInfo.nStnPos, tagInfo.nTagPos, value ? 1 : 0);
-            TRACE("DI/DO 태그 적용: %s = %d\n", tagName, value ? 1 : 0);
-            return true;
-        case TYPE_AI:
-        case TYPE_AO:
-            EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, static_cast<double>(value));
-            TRACE("AI/AO 태그 적용: %s = %d\n", tagName, value);
-            return true;
-        case TYPE_SI:
-        {
-            CString strValue;
-            strValue.Format(_T("%d"), value);
-            CT2A utf8Value(strValue, CP_UTF8);
-            EV_PutSBString(tagInfo.nStnPos, tagInfo.nTagPos * 2,
-                utf8Value, strlen(utf8Value));
-            TRACE("SI 태그 적용: %s = %d\n", tagName, value);
-            return true;
-        }
-        default:
-            TRACE("지원하지 않는 태그 타입: %s (타입: %d)\n", tagName, tagInfo.nTagType);
-            return false;
-        }
-    }
-    catch (const std::exception& e) {
-        TRACE("태그 값 설정 오류: %s\n", e.what());
-        return false;
-    }
-}
-
-bool CJsonParser::ApplyValueToEasyViewTag(const CString& tagName, double value) const
-{
-    ST_EV_TAG_INFO tagInfo;
-    if (EV_GetTagInfo(tagName, &tagInfo) <= 0) {
-        TRACE("태그를 찾을 수 없음: %s\n", tagName);
-        return false;
-    }
-
-    try {
-        switch (tagInfo.nTagType) {
-        case TYPE_DI:
-        case TYPE_DO:
-            EV_PutSBDiValue(tagInfo.nStnPos, tagInfo.nTagPos, value != 0.0 ? 1 : 0);
-            TRACE("DI/DO 태그 적용: %s = %d\n", tagName, value != 0.0 ? 1 : 0);
-            return true;
-        case TYPE_AI:
-        case TYPE_AO:
-            EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, value);
-            TRACE("AI/AO 태그 적용: %s = %f\n", tagName, value);
-            return true;
-        case TYPE_SI:
-        {
-            CString strValue;
-            strValue.Format(_T("%.6f"), value);
-            CT2A utf8Value(strValue, CP_UTF8);
-            EV_PutSBString(tagInfo.nStnPos, tagInfo.nTagPos * 2,
-                utf8Value, strlen(utf8Value));
-            TRACE("SI 태그 적용: %s = %f\n", tagName, value);
-            return true;
-        }
-        default:
-            TRACE("지원하지 않는 태그 타입: %s (타입: %d)\n", tagName, tagInfo.nTagType);
-            return false;
-        }
-    }
-    catch (const std::exception& e) {
-        TRACE("태그 값 설정 오류: %s\n", e.what());
-        return false;
-    }
-}
-
-// *** 기존 메서드들 (하위 호환성을 위해 유지) ***
-
-//void CJsonParser::FillEventDataFromJson()
-//{
-//    try {
-//        // 기본 정보 추출
-//        if (m_jsonData.contains("code")) {
-//            if (m_jsonData["code"].is_string()) {
-//                m_eventData.code = m_jsonData["code"];
-//            }
-//        }
-//
-//        if (m_jsonData.contains("cid")) {
-//            if (m_jsonData["cid"].is_number()) {
-//                m_eventData.cid = m_jsonData["cid"];
-//            }
-//        }
-//
-//        if (m_jsonData.contains("adr")) {
-//            if (m_jsonData["adr"].is_string()) {
-//                m_eventData.adr = m_jsonData["adr"];
-//            }
-//        }
-//
-//        // data 객체 처리
-//        if (m_jsonData.contains("data") && m_jsonData["data"].is_object()) {
-//            const auto& data = m_jsonData["data"];
-//
-//            if (data.contains("eventno")) {
-//                m_eventData.eventNo = data["eventno"];
-//            }
-//
-//            if (data.contains("srcurl")) {
-//                m_eventData.srcUrl = data["srcurl"];
-//            }
-//
-//            // payload 처리
-//            if (data.contains("payload") && data["payload"].is_object()) {
-//                const auto& payload = data["payload"];
-//
-//                // 타이머 카운터
-//                if (payload.contains("/timer[1]/counter")) {
-//                    const auto& timer = payload["/timer[1]/counter"];
-//                    if (timer.is_object() && timer.contains("code") && timer.contains("data")) {
-//                        m_eventData.timerCounter.code = timer["code"];
-//                        m_eventData.timerCounter.data = timer["data"];
-//                        m_eventData.timerCounter.valid = true;
-//                    }
-//                }
-//
-//                // 온도
-//                if (payload.contains("/processdatamaster/temperature")) {
-//                    const auto& temp = payload["/processdatamaster/temperature"];
-//                    if (temp.is_object() && temp.contains("code") && temp.contains("data")) {
-//                        m_eventData.temperature.code = temp["code"];
-//                        m_eventData.temperature.data = temp["data"];
-//                        m_eventData.temperature.valid = true;
-//                    }
-//                }
-//
-//                // IOLink
-//                if (payload.contains("/iolinkmaster/port[2]/iolinkdevice/pdin")) {
-//                    const auto& iolink = payload["/iolinkmaster/port[2]/iolinkdevice/pdin"];
-//                    if (iolink.is_object() && iolink.contains("code") && iolink.contains("data")) {
-//                        m_eventData.iolinkDevice.code = iolink["code"];
-//                        if (iolink["data"].is_string()) {
-//                            m_eventData.iolinkDevice.data = iolink["data"];
-//                        }
-//                        else if (iolink["data"].is_number()) {
-//                            m_eventData.iolinkDevice.data = std::to_string(iolink["data"].get<int>());
-//                        }
-//                        m_eventData.iolinkDevice.valid = true;
-//                    }
-//                }
-//            }
-//        }
-//    }
-//    catch (const std::exception& e) {
-//        TRACE("EventData 채우기 오류: %s\n", e.what());
-//    }
-//}
-
-bool CJsonParser::ApplyJsonToTags(
-    const CString& timerCounterTag,
-    const CString& temperatureTag,
-    const CString& ioLinkPdinTag,
-    int setNumber,
-    const CString& tagGroup) const
-{
-    // 새로운 매핑 시스템 우선 사용
-    bool newSystemResult = ApplyJsonToTagsUsingMapping();
-    if (newSystemResult) {
-        return true;
-    }
-
-    // 새로운 시스템이 실패하면 기존 방식으로 fallback
-    if (!m_isValid) {
-        return false;
-    }
-
-    // 이벤트 코드가 "event"인 경우에만 처리 (기존 로직)
-    if (m_eventData.code != "event") {
-        return false;
-    }
-
-    bool result = false;
-    ST_EV_TAG_INFO tagInfo;
-
-    // 타이머 카운터 처리
-    if (m_eventData.timerCounter.valid && m_eventData.timerCounter.code == 200) {
-        if (EV_GetTagInfo(timerCounterTag, &tagInfo) > 0) {
-            switch (tagInfo.nTagType) {
-            case TYPE_DI:
-            case TYPE_DO:
-                EV_PutSBDiValue(tagInfo.nStnPos, tagInfo.nTagPos, m_eventData.timerCounter.data ? 1 : 0);
-                break;
-            case TYPE_AI:
-            case TYPE_AO:
-                EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, m_eventData.timerCounter.data);
-                break;
-            }
-            result = true;
-        }
-    }
-
-    // 온도 데이터 처리
-    if (m_eventData.temperature.valid && m_eventData.temperature.code == 200) {
-        if (EV_GetTagInfo(temperatureTag, &tagInfo) > 0) {
-            if (tagInfo.nTagType == TYPE_AI || tagInfo.nTagType == TYPE_AO) {
-                EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, m_eventData.temperature.data);
-                result = true;
-            }
-        }
-    }
-
-    // IOLink 데이터 처리
-    if (m_eventData.iolinkDevice.valid && m_eventData.iolinkDevice.code == 200) {
-        if (EV_GetTagInfo(ioLinkPdinTag, &tagInfo) > 0) {
-            if (tagInfo.nTagType == TYPE_AI || tagInfo.nTagType == TYPE_AO) {
-                // 문자열을 숫자로 변환
-                double value = 0.0;
-                bool conversionSuccess = true;
-
-                // 모든 문자가 16진수에 유효한지 확인하는 함수
-                auto isHexString = [](const std::string& str) {
-                    return str.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos;
-                };
-
-                // 접두사 확인과 16진수 판별
-                bool isHex = false;
-                std::string dataStr = m_eventData.iolinkDevice.data;
-
-                // "0x" 또는 "0X" 접두사가 있는 경우
-                if (dataStr.length() > 2 && (dataStr.substr(0, 2) == "0x" || dataStr.substr(0, 2) == "0X")) {
-                    dataStr = dataStr.substr(2);  // 접두사 제거
-                    isHex = true;
-                }
-                // 접두사 없이 16진수 형태인지 확인 (A-F 문자 포함)
-                else if (isHexString(dataStr) &&
-                    dataStr.find_first_of("ABCDEFabcdef") != std::string::npos) {
-                    isHex = true;
-                }
-
-                // 16진수로 처리
-                if (isHex) {
-                    unsigned int hexValue = 0;
-                    if (sscanf_s(dataStr.c_str(), "%x", &hexValue) == 1) {
-                        value = static_cast<double>(hexValue);
-                        TRACE("16진수 문자열 '%s'를 숫자 %f로 변환\n",
-                            m_eventData.iolinkDevice.data.c_str(), value);
-                    }
-                    else {
-                        TRACE("16진수 변환 실패: '%s'\n", m_eventData.iolinkDevice.data.c_str());
-                        conversionSuccess = false;
-                    }
-                }
-                // 10진수로 처리
-                else {
-                    try {
-                        value = atof(m_eventData.iolinkDevice.data.c_str());
-                        TRACE("10진수 문자열 '%s'를 숫자 %f로 변환\n",
-                            m_eventData.iolinkDevice.data.c_str(), value);
-                    }
-                    catch (...) {
-                        TRACE("10진수 변환 실패: '%s'\n", m_eventData.iolinkDevice.data.c_str());
-                        conversionSuccess = false;
-                    }
-                }
-
-                // 변환 성공 시 값 저장
-                if (conversionSuccess) {
-                    EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, value);
-                    TRACE("IOLink 데이터를 AI/AO 태그에 값 %f로 저장\n", value);
-                    result = true;
-                }
-            }
-            else if (tagInfo.nTagType == TYPE_SI) {
-                // 기존 문자열 처리 유지
-                EV_PutSBString(tagInfo.nStnPos, tagInfo.nTagPos * 2,
-                    m_eventData.iolinkDevice.data.c_str(),
-                    m_eventData.iolinkDevice.data.length());
-                result = true;
-            }
-        }
-    }
-
-    return result;
-}
-
-void CJsonParser::TraceEventData()
-{
-    OutputDebugStringW(L"--- JSON Parsing ---\n");
-
-    wchar_t buffer[1024];
-
-    swprintf_s(buffer, L"Code: %hs\n", m_eventData.code.c_str());
-    OutputDebugStringW(buffer);
-
-    swprintf_s(buffer, L"CID: %d\n", m_eventData.cid);
-    OutputDebugStringW(buffer);
-
-    swprintf_s(buffer, L"ADR: %hs\n", m_eventData.adr.c_str());
-    OutputDebugStringW(buffer);
-
-    swprintf_s(buffer, L"EVENT Number: %hs\n", m_eventData.eventNo.c_str());
-    OutputDebugStringW(buffer);
-
-    swprintf_s(buffer, L"Source URL: %hs\n", m_eventData.srcUrl.c_str());
-    OutputDebugStringW(buffer);
-
-    if (m_eventData.timerCounter.valid) {
-        swprintf_s(buffer, L"Timer Counter - Code: %d, Data: %d\n",
-            m_eventData.timerCounter.code,
-            m_eventData.timerCounter.data);
-        OutputDebugStringW(buffer);
-    }
-
-    if (m_eventData.temperature.valid) {
-        swprintf_s(buffer, L"Temp - Code: %d, Data: %d\n",
-            m_eventData.temperature.code,
-            m_eventData.temperature.data);
-        OutputDebugStringW(buffer);
-    }
-
-    if (m_eventData.iolinkDevice.valid) {
-        swprintf_s(buffer, L"IOLink - Code: %d, data: %hs\n",
-            m_eventData.iolinkDevice.code,
-            m_eventData.iolinkDevice.data.c_str());
-        OutputDebugStringW(buffer);
-    }
-
-    OutputDebugStringW(L"----------------------\n");
+	if (!m_isValid) {
+		return false;
+	}
+	return CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, outValue);
 }

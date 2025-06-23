@@ -148,18 +148,19 @@ bool CJsonPathUtil::IsValidJsonPath(const CString& jsonPath)
         return false;
     }
 
-    // 기본적인 JSONPath 검증
-    // $ 로 시작해야 함
-    if (jsonPath.GetAt(0) != '$') {
+    // 두 가지 형식 지원:
+    // 1. 표준 JSONPath: $.data.payload...
+    // 2. 슬래시 경로: /data/payload...
+    TCHAR firstChar = jsonPath.GetAt(0);
+    if (firstChar != '$' && firstChar != '/') {
         return false;
     }
 
-    // 간단한 구문 검증
+    // 기본적인 구문 검증
     CString path = jsonPath;
-    path.Replace(_T("$"), _T(""));
-
-    // 연속된 점이나 잘못된 문자 확인
-    if (path.Find(_T("..")) >= 0) {
+    
+    // 연속된 점이나 슬래시 확인
+    if (path.Find(_T("..")) >= 0 || path.Find(_T("//")) >= 0) {
         return false;
     }
 
@@ -168,43 +169,112 @@ bool CJsonPathUtil::IsValidJsonPath(const CString& jsonPath)
 
 std::vector<std::string> CJsonPathUtil::ParseJsonPath(const CString& jsonPath)
 {
-    std::vector<std::string> tokens;
+	std::vector<std::string> tokens;
 
-    if (!IsValidJsonPath(jsonPath)) {
-        return tokens;
-    }
+	TRACE("=== JSONPath 파싱 시작 ===\n");
+	TRACE("입력 경로: '%S'\n", (LPCTSTR)jsonPath);
 
-    // CString을 std::string으로 변환
-    std::string path = CT2A(jsonPath);
+	if (!IsValidJsonPath(jsonPath)) {
+		TRACE("JSONPath 유효성 검사 실패\n");
+		return tokens;
+	}
 
-    // $ 제거
-    if (path[0] == '$') {
-        path = path.substr(1);
-    }
+	// CString을 std::string으로 변환
+	std::string path = CT2A(jsonPath);
+	TRACE("변환된 경로: '%s'\n", path.c_str());
 
-    // 빈 경로면 루트 반환
-    if (path.empty() || path == ".") {
-        return tokens;
-    }
+	// 경로 형식에 따른 처리
+	if (path[0] == '$') {
+		TRACE("표준 JSONPath 형식으로 처리\n");
+		// 표준 JSONPath 처리: $.data.payload...
+		path = path.substr(1);  // $ 제거
 
-    // 점으로 시작하면 제거
-    if (path[0] == '.') {
-        path = path.substr(1);
-    }
+		// 빈 경로면 루트 반환
+		if (path.empty() || path == ".") {
+			TRACE("루트 경로 반환\n");
+			return tokens;
+		}
 
-    // 토큰 분리
-    std::stringstream ss(path);
-    std::string token;
+		// 점으로 시작하면 제거
+		if (path[0] == '.') {
+			path = path.substr(1);
+		}
 
-    while (std::getline(ss, token, '.')) {
-        if (!token.empty()) {
-            // 특수 키 처리 (슬래시가 포함된 키 등)
-            token = ProcessSpecialKey(token);
-            tokens.push_back(token);
-        }
-    }
+		// 점으로 토큰 분리
+		std::stringstream ss(path);
+		std::string token;
+		while (std::getline(ss, token, '.')) {
+			if (!token.empty()) {
+				token = ProcessSpecialKey(token);
+				tokens.push_back(token);
+				TRACE("토큰 추가: '%s'\n", token.c_str());
+			}
+		}
+	}
+	else if (path[0] == '/') {
+		TRACE("슬래시 경로 형식으로 처리\n");
+		path = path.substr(1);  // 첫 번째 / 제거
+		TRACE("/ 제거 후 경로: '%s'\n", path.c_str());
 
-    return tokens;
+		if (path.empty()) {
+			TRACE("빈 경로 - 루트 반환\n");
+			return tokens;
+		}
+
+		// **핵심 수정: 특별한 패턴 감지 및 처리**
+		// /data/payload/iolinkmaster/port[3]/iolinkdevice/pdin/data 패턴을
+		// data, payload, "/iolinkmaster/port[3]/iolinkdevice/pdin", data로 분리
+
+		if (path.find("data/payload/") == 0) {
+			TRACE("data/payload/ 패턴 감지\n");
+
+			tokens.push_back("data");
+			tokens.push_back("payload");
+
+			// data/payload/ 제거
+			std::string remainingPath = path.substr(12); // "data/payload/" 길이
+			TRACE("남은 경로: '%s'\n", remainingPath.c_str());
+
+			// 마지막 /data 부분 찾기
+			size_t lastSlashPos = remainingPath.find_last_of('/');
+			if (lastSlashPos != std::string::npos &&
+				remainingPath.substr(lastSlashPos + 1) == "data") {
+
+				// 중간 부분을 하나의 키로 처리 - **여기서 슬래시 중복 제거**
+				std::string middleKey = remainingPath.substr(0, lastSlashPos);
+
+				// 만약 middleKey가 슬래시로 시작하지 않으면 추가
+				if (!middleKey.empty() && middleKey[0] != '/') {
+					middleKey = "/" + middleKey;
+				}
+
+				tokens.push_back(middleKey);
+				tokens.push_back("data");
+
+				TRACE("중간 키로 처리: '%s'\n", middleKey.c_str());
+				TRACE("최종 키: 'data'\n");
+			}
+			else {
+				// 마지막이 data가 아닌 경우, 전체를 하나의 키로 처리
+				std::string wholeKey = remainingPath;
+
+				// 만약 wholeKey가 슬래시로 시작하지 않으면 추가
+				if (!wholeKey.empty() && wholeKey[0] != '/') {
+					wholeKey = "/" + wholeKey;
+				}
+
+				tokens.push_back(wholeKey);
+				TRACE("전체 키로 처리: '%s'\n", wholeKey.c_str());
+			}
+		}
+	}
+
+	TRACE("=== JSONPath 파싱 완료 - 총 %d개 토큰 ===\n", tokens.size());
+	for (size_t i = 0; i < tokens.size(); ++i) {
+		TRACE("토큰[%d]: '%s'\n", i, tokens[i].c_str());
+	}
+
+	return tokens;
 }
 
 const nlohmann::json* CJsonPathUtil::NavigateToValue(const nlohmann::json& jsonData,
@@ -212,32 +282,71 @@ const nlohmann::json* CJsonPathUtil::NavigateToValue(const nlohmann::json& jsonD
 {
     const nlohmann::json* current = &jsonData;
 
-    for (const auto& token : pathTokens) {
+    TRACE("=== JSON 경로 탐색 시작 ===\n");
+    TRACE("총 토큰 개수: %d\n", pathTokens.size());
+    
+    for (size_t i = 0; i < pathTokens.size(); ++i) {
+        const auto& token = pathTokens[i];
+        
         if (!current) {
+            TRACE("토큰 %d: '%s' - current가 nullptr\n", i, token.c_str());
             return nullptr;
+        }
+
+        TRACE("토큰 %d: '%s'\n", i, token.c_str());
+        
+        // 현재 JSON 타입 출력
+        if (current->is_object()) {
+            TRACE("  현재 타입: object (키 개수: %d)\n", current->size());
+            // 사용 가능한 키들 출력
+            TRACE("  사용 가능한 키: ");
+            for (auto it = current->begin(); it != current->end(); ++it) {
+                TRACE("'%s' ", it.key().c_str());
+            }
+            TRACE("\n");
+        }
+        else if (current->is_array()) {
+            TRACE("  현재 타입: array (크기: %d)\n", current->size());
+        }
+        else {
+            TRACE("  현재 타입: 기타 (%s)\n", current->type_name());
         }
 
         // 배열 인덱스 처리
         if (IsArrayIndex(token)) {
             int index = ParseArrayIndex(token);
+            TRACE("  배열 인덱스 처리: %s -> 인덱스 %d\n", token.c_str(), index);
+            
             if (current->is_array() && index >= 0 && index < static_cast<int>(current->size())) {
                 current = &(*current)[index];
+                TRACE("  배열 인덱스 접근 성공\n");
             }
             else {
+                TRACE("  배열 인덱스 접근 실패 - is_array: %s, index: %d, size: %d\n", 
+                      current->is_array() ? "true" : "false", 
+                      index, 
+                      current->is_array() ? current->size() : 0);
                 return nullptr;
             }
         }
         // 객체 키 처리
         else {
+            TRACE("  객체 키 처리: '%s'\n", token.c_str());
+            
             if (current->is_object() && current->contains(token)) {
                 current = &(*current)[token];
+                TRACE("  객체 키 접근 성공\n");
             }
             else {
+                TRACE("  객체 키 접근 실패 - is_object: %s, contains: %s\n", 
+                      current->is_object() ? "true" : "false",
+                      current->is_object() && current->contains(token) ? "true" : "false");
                 return nullptr;
             }
         }
     }
 
+    TRACE("=== JSON 경로 탐색 완료 - 성공 ===\n");
     return current;
 }
 

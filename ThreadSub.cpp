@@ -120,112 +120,119 @@ void subscribe_callback(struct mosquitto* mosq, void* obj, int mid, int qos_coun
 
 void message_callback(struct mosquitto* mosq, void* obj, const struct mosquitto_message* msg)
 {
-    TRACE("=== MQTT Message Received! ===\n");
-    TRACE("Topic: '%s'\n", msg->topic);
-    TRACE("Message size: %d bytes\n", msg->payloadlen);
-    
-    if (msg->payloadlen == 0) {
-        TRACE("Empty message - skipping processing\n");
-        return;
-    }
+	TRACE("=== MQTT Message Received! ===\n");
+	TRACE("Topic: '%s'\n", msg->topic);
+	TRACE("Message size: %d bytes\n", msg->payloadlen);
 
-    const char* payload = (const char*)msg->payload;
-    
-    // Message content preview (max 200 chars)
-    int printLen = (msg->payloadlen > 200) ? 200 : msg->payloadlen;
-    char preview[201] = {0};
-    strncpy_s(preview, 201, payload, printLen);
-    TRACE("Message content: %s%s\n", preview, (msg->payloadlen > 200) ? "..." : "");
+	if (msg->payloadlen == 0) {
+		TRACE("Empty message - skipping processing\n");
+		return;
+	}
 
-    if (payload[0] != '{' && payload[0] != '[') {
-        TRACE("Non-JSON message: %s\n", payload);
-        return; // Skip parsing if not JSON
-    }
+	const char* payload = (const char*)msg->payload;
 
-    // Get ThreadSub object pointer (passed via obj parameter)
-    CThreadSub* pThreadSub = static_cast<CThreadSub*>(obj);
-    if (!pThreadSub) {
-        TRACE("ThreadSub object is NULL\n");
-        return;
-    }
+	// Message content preview (max 200 chars)
+	int printLen = (msg->payloadlen > 200) ? 200 : msg->payloadlen;
+	char preview[201] = { 0 };
+	strncpy_s(preview, 201, payload, printLen);
+	TRACE("Message content: %s%s\n", preview, (msg->payloadlen > 200) ? "..." : "");
 
-    CEVMQTTDlg* pDlg = (CEVMQTTDlg*)pThreadSub->m_pOwner;
+	if (payload[0] != '{' && payload[0] != '[') {
+		TRACE("Non-JSON message: %s\n", payload);
+		return; // Skip parsing if not JSON
+	}
 
-    try {
-        TRACE("JSON parsing started...\n");
-        
-        // Parse JSON message
-        CJsonParser jsonParser;
-        bool parsed = jsonParser.ParseMessage(payload, msg->payloadlen);
+	// Get ThreadSub object pointer (passed via obj parameter)
+	CThreadSub* pThreadSub = static_cast<CThreadSub*>(obj);
+	if (!pThreadSub) {
+		TRACE("ThreadSub object is NULL\n");
+		return;
+	}
 
-        // Check for errors based on parser results
-        bool hasError = false;
-        CString errorMessage;
-        CString mqttIdentifier;
-        mqttIdentifier.Format(_T("MQTT/%s"), CStringA(msg->topic).GetString());
+	CEVMQTTDlg* pDlg = (CEVMQTTDlg*)pThreadSub->m_pOwner;
 
-        if (!parsed) {
-            // Basic parsing failed (JSON format error)
-            hasError = true;
-            errorMessage = _T("MQTT JSON parsing error");
-            TRACE("JSON parsing failed\n");
-        }
-        else if (jsonParser.GetParseStatus() != CJsonParser::PARSE_SUCCESS) {
-            // Basic parsing succeeded but data validation error occurred
-            hasError = true;
-            errorMessage = jsonParser.GetErrorMessage();
-            TRACE("JSON data validation failed: %s\n", CStringA(errorMessage).GetString());
-        }
-        else {
-            TRACE("JSON parsing success!\n");
-            
-            // Process MQTT message using tag mapping from INI file
-            CString mqttTopic = CString(msg->topic);
-            
-            // Get tag mapping information from ConfigManager
-            CConfigManager& configManager = CConfigManager::GetInstance();
-            
-            TRACE("Processing MQTT topic: %s\n", CStringA(mqttTopic).GetString());
-            
-            // Apply tags mapped to this topic
-            bool tagResult = jsonParser.ApplyMqttTagMapping(mqttTopic);
+	try {
+		TRACE("JSON parsing started...\n");
 
-            if (tagResult) {
-                TRACE("EasyView tag application success!\n");
+		// Parse JSON message
+		CJsonParser jsonParser;
+		bool parsed = jsonParser.ParseMessage(payload, msg->payloadlen);
 
-                // Add success log
-                if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-                    pDlg->AddDebugLog(_T("MQTT message processing success"), CString(msg->topic), DebugLogItem::LOG_SUCCESS);
-                }
-            }
-            else {
-                TRACE("EasyView tag application failed\n");
-                hasError = true;
-                errorMessage = _T("EasyView tag application failed");
-            }
-        }
+		// Check for errors based on parser results
+		bool hasError = false;
+		CString errorMessage;
+		CString mqttIdentifier;
+		mqttIdentifier.Format(_T("MQTT/%s"), CStringA(msg->topic).GetString());
 
-        // Add error log if there are errors
-        if (hasError && pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-            pDlg->AddDebugLog(errorMessage, CString(msg->topic), DebugLogItem::LOG_ERROR);
-        }
+		if (!parsed) {
+			// Basic parsing failed (JSON format error)
+			hasError = true;
+			errorMessage = _T("MQTT JSON parsing error");
+			TRACE("JSON parsing failed\n");
+		}
+		else if (jsonParser.GetParseStatus() != CJsonParser::PARSE_SUCCESS) {
+			// Basic parsing succeeded but data validation error occurred
+			hasError = true;
+			errorMessage = jsonParser.GetErrorMessage();
+			TRACE("JSON data validation failed: %s\n", CStringA(errorMessage).GetString());
+		}
+		else {
+			TRACE("JSON parsing success!\n");
 
-        // Update statistics
-        if (!hasError) {
-            pThreadSub->m_nParsedCount++;
-            pThreadSub->UpdateStats(pThreadSub->m_nParsedCount, pThreadSub->m_nTotalCount);
-        }
+			// Process MQTT message using tag mapping from INI file
+			CString mqttTopic = CString(msg->topic);
 
-    }
-    catch (const std::exception& e) {
-        TRACE("Exception occurred during message processing: %s\n", e.what());
-        
-        if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-            CString errorMsg;
-            errorMsg.Format(_T("MQTT message processing exception: %hs"), e.what());
-            pDlg->AddDebugLog(errorMsg, CString(msg->topic), DebugLogItem::LOG_ERROR);
-        }
-    }
+			TRACE("Processing MQTT topic: %s\n", CStringA(mqttTopic).GetString());
+
+			// Apply tags mapped to this topic
+			bool tagResult = jsonParser.ApplyMqttTagMapping(mqttTopic);
+
+			if (tagResult) {
+				TRACE("EasyView tag application success!\n");
+
+				// 간단한 결과 데이터 생성 및 저장
+				SimpleEventData simpleData;
+				simpleData.eventType = _T("mqtt_message");
+				simpleData.deviceId = CString(msg->topic);
+				simpleData.timestamp = CTime::GetCurrentTime().Format(_T("%Y-%m-%d %H:%M:%S"));
+				simpleData.isValid = true;
+
+				// 결과 저장
+				CJsonResultManager::GetInstance().StoreResult(mqttIdentifier, simpleData);
+
+				// Add success log
+				if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+					pDlg->AddDebugLog(_T("MQTT message processing success"), CString(msg->topic), DebugLogItem::LOG_SUCCESS);
+				}
+			}
+			else {
+				TRACE("EasyView tag application failed\n");
+				hasError = true;
+				errorMessage = _T("EasyView tag application failed");
+			}
+		}
+
+		// Add error log if there are errors
+		if (hasError && pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+			pDlg->AddDebugLog(errorMessage, CString(msg->topic), DebugLogItem::LOG_ERROR);
+		}
+
+		// Update statistics
+		if (!hasError) {
+			pThreadSub->m_nParsedCount++;
+			pThreadSub->UpdateStats(pThreadSub->m_nParsedCount, pThreadSub->m_nTotalCount);
+		}
+
+	}
+	catch (const std::exception& e) {
+		TRACE("Exception occurred during message processing: %s\n", e.what());
+
+		if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
+			CString errorMsg;
+			errorMsg.Format(_T("MQTT message processing exception: %hs"), e.what());
+			pDlg->AddDebugLog(errorMsg, CString(msg->topic), DebugLogItem::LOG_ERROR);
+		}
+	}
 }
 
 

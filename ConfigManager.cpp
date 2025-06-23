@@ -204,9 +204,9 @@ void CConfigManager::CreateDefaultTagMappings()
 {
     // 기본 태그 매핑 생성
     m_tagMappings.clear();
-    m_tagMappings[_T("TEST1")] = _T("/RINK1,/data/payload/iolinkmaster/port[1]/iolinkdevice/pdin/data");
-    m_tagMappings[_T("TEST2")] = _T("/RINK1,/data/payload/iolinkmaster/port[2]/iolinkdevice/pdin/data");
-    m_tagMappings[_T("TEST3")] = _T("/RINK1,/data/payload/iolinkmaster/port[3]/iolinkdevice/pdin/data");
+    //m_tagMappings[_T("TEST1")] = _T("/RINK1,/data/payload/iolinkmaster/port[1]/iolinkdevice/pdin/data");
+    //m_tagMappings[_T("TEST2")] = _T("/RINK1,/data/payload/iolinkmaster/port[2]/iolinkdevice/pdin/data");
+    //m_tagMappings[_T("TEST3")] = _T("/RINK1,/data/payload/iolinkmaster/port[3]/iolinkdevice/pdin/data");
 }
 
 void CConfigManager::RemoveTagMapping(const CString& tagName)

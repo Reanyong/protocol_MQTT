@@ -21,11 +21,11 @@ public:
     // JSONPath를 토큰으로 분리
     static std::vector<std::string> ParseJsonPath(const CString& jsonPath);
 
-private:
-    // JSON 객체에서 경로를 따라 값 찾기
-    static const nlohmann::json* NavigateToValue(const nlohmann::json& jsonData,
-        const std::vector<std::string>& pathTokens);
+	// JSON 객체에서 경로를 따라 값 찾기
+	static const nlohmann::json* NavigateToValue(const nlohmann::json& jsonData,
+		const std::vector<std::string>& pathTokens);
 
+private:
     // 배열 인덱스 파싱 (예: "[1]" -> 1)
     static int ParseArrayIndex(const std::string& token);
 
