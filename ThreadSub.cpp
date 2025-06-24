@@ -1,4 +1,4 @@
-﻿// CThreadSub.cpp : implementation file
+// CThreadSub.cpp : implementation file
 //
 
 #include "pch.h"
@@ -7,6 +7,7 @@
 #include "ThreadSub.h"
 #include "ConfigManager.h"
 #include "JsonResultManager.h"
+#include "MqttWorkerThread.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -31,36 +32,46 @@ CThreadSub::CThreadSub()
     pParam = NULL;
 
     /*
-    해당 설정 ConfigManager에서 진행
+    Configuration handled by ConfigManager
     sprintf_s(m_szIP, sizeof(m_szIP), "127.0.0.1");
     sprintf_s(m_szTopic, sizeof(m_szTopic), "my_topic");
     m_nPort = 1883;
     m_nKeepAlive = 60;
     */
 
-    // 파싱 통계 초기화
+    // Initialize parsing statistics
     m_nParsedCount = 0;
     m_nTotalCount = 0;
+
+    // Initialize multithreading
+    m_pMessageQueue = nullptr;
+    m_workerThreadCount = 3;
 }
 
 CThreadSub::~CThreadSub()
 {
+    DestroyWorkerThreads();
+
+    if (m_pMessageQueue) {
+        delete m_pMessageQueue;
+        m_pMessageQueue = nullptr;
+    }
 }
 
 BOOL CThreadSub::InitInstance()
 {
-    // EasyView 엔진에 연결
+    // Connect to EasyView engine
     char szBuff[256] = { 0, };
     char szProjectName[256] = { 0, };
 
     EV_GetConfigFile(szBuff);
     ::GetPrivateProfileString(
-        "EasyView",        // 섹션 이름
-        "Project",         // 키 이름
-        "",                // 기본값 (없으면 빈 문자열)
-        szProjectName,     // 결과 버퍼
+        "EasyView",        // Section name
+        "Project",         // Key name
+        "",                // Default value (empty string if not found)
+        szProjectName,     // Result buffer
         sizeof(szProjectName),
-        szBuff             // INI 파일 경로
+        szBuff             // INI file path
     );
 
     int nResult = EV_OpenMem(szProjectName);
@@ -68,7 +79,7 @@ BOOL CThreadSub::InitInstance()
         TRACE(_T("EasyView Engine Connected: %s\n"), szProjectName);
     }
     else {
-        TRACE("EasyView Engine Fail Connection: %d\n", nResult);
+        TRACE("EasyView Engine Connection Failed: %d\n", nResult);
     }
 
     return TRUE;
@@ -97,7 +108,8 @@ void connect_callback(struct mosquitto* mosq, void* obj, int result)
 {
     if (result == 0) {
         TRACE("=== MQTT Connection Success! ===\n");
-    } else {
+    }
+    else {
         TRACE("=== MQTT Connection Failed! Error code: %d ===\n", result);
         switch (result) {
         case 1: TRACE("Connection refused: bad protocol version\n"); break;
@@ -120,124 +132,59 @@ void subscribe_callback(struct mosquitto* mosq, void* obj, int mid, int qos_coun
 
 void message_callback(struct mosquitto* mosq, void* obj, const struct mosquitto_message* msg)
 {
-	TRACE("=== MQTT Message Received! ===\n");
-	TRACE("Topic: '%s'\n", msg->topic);
-	TRACE("Message size: %d bytes\n", msg->payloadlen);
+    // Basic validation
+    if (!msg || !obj) {
+        TRACE("message_callback: null pointer received\n");
+        return;
+    }
 
-	if (msg->payloadlen == 0) {
-		TRACE("Empty message - skipping processing\n");
-		return;
-	}
+    CThreadSub* pThreadSub = static_cast<CThreadSub*>(obj);
+    if (!pThreadSub) {
+        TRACE("message_callback: ThreadSub object is null\n");
+        return;
+    }
 
-	const char* payload = (const char*)msg->payload;
+    TRACE("=== MQTT Message Received ===\n");
+    TRACE("Topic: '%s'\n", msg->topic ? msg->topic : "null");
+    TRACE("Size: %d bytes\n", msg->payloadlen);
 
-	// Message content preview (max 200 chars)
-	int printLen = (msg->payloadlen > 200) ? 200 : msg->payloadlen;
-	char preview[201] = { 0 };
-	strncpy_s(preview, 201, payload, printLen);
-	TRACE("Message content: %s%s\n", preview, (msg->payloadlen > 200) ? "..." : "");
+    // Empty message check
+    if (msg->payloadlen == 0 || !msg->payload) {
+        TRACE("Empty message - skipping\n");
+        return;
+    }
 
-	if (payload[0] != '{' && payload[0] != '[') {
-		TRACE("Non-JSON message: %s\n", payload);
-		return; // Skip parsing if not JSON
-	}
+    // JSON format check
+    const char* payload = (const char*)msg->payload;
+    if (payload[0] != '{' && payload[0] != '[') {
+        TRACE("Non-JSON message: %.*s\n",
+            (msg->payloadlen > 50 ? 50 : msg->payloadlen), payload);
+        return;
+    }
 
-	// Get ThreadSub object pointer (passed via obj parameter)
-	CThreadSub* pThreadSub = static_cast<CThreadSub*>(obj);
-	if (!pThreadSub) {
-		TRACE("ThreadSub object is NULL\n");
-		return;
-	}
+    // Multithreaded approach: Add to message queue
+    if (pThreadSub->m_pMessageQueue) {
+        MqttMessage mqttMsg(msg->topic, payload, msg->payloadlen);
 
-	CEVMQTTDlg* pDlg = (CEVMQTTDlg*)pThreadSub->m_pOwner;
+        if (pThreadSub->m_pMessageQueue->Push(mqttMsg)) {
+            pThreadSub->m_nTotalCount++;
 
-	try {
-		TRACE("JSON parsing started...\n");
-
-		// Parse JSON message
-		CJsonParser jsonParser;
-		bool parsed = jsonParser.ParseMessage(payload, msg->payloadlen);
-
-		// Check for errors based on parser results
-		bool hasError = false;
-		CString errorMessage;
-		CString mqttIdentifier;
-		mqttIdentifier.Format(_T("MQTT/%s"), CStringA(msg->topic).GetString());
-
-		if (!parsed) {
-			// Basic parsing failed (JSON format error)
-			hasError = true;
-			errorMessage = _T("MQTT JSON parsing error");
-			TRACE("JSON parsing failed\n");
-		}
-		else if (jsonParser.GetParseStatus() != CJsonParser::PARSE_SUCCESS) {
-			// Basic parsing succeeded but data validation error occurred
-			hasError = true;
-			errorMessage = jsonParser.GetErrorMessage();
-			TRACE("JSON data validation failed: %s\n", CStringA(errorMessage).GetString());
-		}
-		else {
-			TRACE("JSON parsing success!\n");
-
-			// Process MQTT message using tag mapping from INI file
-			CString mqttTopic = CString(msg->topic);
-
-			TRACE("Processing MQTT topic: %s\n", CStringA(mqttTopic).GetString());
-
-			// Apply tags mapped to this topic
-			bool tagResult = jsonParser.ApplyMqttTagMapping(mqttTopic);
-
-			if (tagResult) {
-				TRACE("EasyView tag application success!\n");
-
-				// 간단한 결과 데이터 생성 및 저장
-				SimpleEventData simpleData;
-				simpleData.eventType = _T("mqtt_message");
-				simpleData.deviceId = CString(msg->topic);
-				simpleData.timestamp = CTime::GetCurrentTime().Format(_T("%Y-%m-%d %H:%M:%S"));
-				simpleData.isValid = true;
-
-				// 결과 저장
-				CJsonResultManager::GetInstance().StoreResult(mqttIdentifier, simpleData);
-
-				// Add success log
-				if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-					pDlg->AddDebugLog(_T("MQTT message processing success"), CString(msg->topic), DebugLogItem::LOG_SUCCESS);
-				}
-			}
-			else {
-				TRACE("EasyView tag application failed\n");
-				hasError = true;
-				errorMessage = _T("EasyView tag application failed");
-			}
-		}
-
-		// Add error log if there are errors
-		if (hasError && pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-			pDlg->AddDebugLog(errorMessage, CString(msg->topic), DebugLogItem::LOG_ERROR);
-		}
-
-		// Update statistics
-		if (!hasError) {
-			pThreadSub->m_nParsedCount++;
-			pThreadSub->UpdateStats(pThreadSub->m_nParsedCount, pThreadSub->m_nTotalCount);
-		}
-
-	}
-	catch (const std::exception& e) {
-		TRACE("Exception occurred during message processing: %s\n", e.what());
-
-		if (pDlg && ::IsWindow(pDlg->GetSafeHwnd())) {
-			CString errorMsg;
-			errorMsg.Format(_T("MQTT message processing exception: %hs"), e.what());
-			pDlg->AddDebugLog(errorMsg, CString(msg->topic), DebugLogItem::LOG_ERROR);
-		}
-	}
+            // Log every 100 messages
+            static int msgCounter = 0;
+            if (++msgCounter % 100 == 0) {
+                TRACE("Message added to queue (Total %d) - Queue size: %d\n",
+                    msgCounter, pThreadSub->m_pMessageQueue->Size());
+            }
+        }
+        else {
+            TRACE("Failed to add message to queue\n");
+        }
+    }
+    else {
+        TRACE("Message queue is null - message ignored\n");
+    }
 }
 
-
-
-// Statistics update method implementation
 void CThreadSub::UpdateStats(int parsedCount, int totalCount)
 {
     if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
@@ -254,122 +201,368 @@ void CThreadSub::UpdateStats(int parsedCount, int totalCount)
     }
 }
 
-
-
 int CThreadSub::Run()
 {
-    // MQTT initialization
-    CEVMQTTApp* pApp = (CEVMQTTApp*)AfxGetApp();
+    TRACE("=== ThreadSub Started ===\n");
+
+    // EasyView 엔진 연결
+    char szBuff[256] = { 0, };
+    char szProjectName[256] = { 0, };
+
+    EV_GetConfigFile(szBuff);
+    ::GetPrivateProfileString(
+        "EasyView", "Project", "", szProjectName,
+        sizeof(szProjectName), szBuff
+    );
+
+    int nResult = EV_OpenMem(szProjectName);
+    if (nResult > 0) {
+        TRACE("EasyView Engine connected successfully: %s\n", szProjectName);
+    }
+    else {
+        TRACE("EasyView Engine connection failed: %d\n", nResult);
+    }
+
+    // 메시지 큐 생성
+    TRACE("Creating message queue...\n");
+    m_pMessageQueue = new CMqttMessageQueue(5000);
+    TRACE("Message queue creation completed\n");
+
+    // 워커 스레드들 생성 - 이 부분에 강화된 디버깅 추가
+    TRACE("About to call CreateWorkerThreads()...\n");
+
+    try {
+        CreateWorkerThreads();
+        TRACE("CreateWorkerThreads() call completed\n");
+    }
+    catch (const std::exception& e) {
+        TRACE("Exception in CreateWorkerThreads(): %s\n", e.what());
+    }
+    catch (...) {
+        TRACE("Unknown exception in CreateWorkerThreads()\n");
+    }
+
+    // 워커 스레드가 실제로 생성되었는지 확인
+    TRACE("Worker threads created: %d\n", m_workerThreads.size());
+    for (size_t i = 0; i < m_workerThreads.size(); i++) {
+        TRACE("Worker %d pointer: %p\n", i + 1, m_workerThreads[i]);
+    }
+
+    // MQTT 초기화 계속...
     DWORD dwCur = GetTickCount();
     DWORD dwOld = dwCur;
-    DWORD dwLastParsing = dwCur;
     int nErrorCode = 1;
     int nNetworkLoop;
-    TRACE(">>>>Start Loop\n");
 
     CConfigManager& configManager = CConfigManager::GetInstance();
     configManager.LoadConfig();
 
-    // Get MQTT configuration from ConfigManager
     CString mqttIp = configManager.GetMqttIp();
     int mqttPort = configManager.GetMqttPort();
     int mqttKeepAlive = configManager.GetMqttKeepAlive();
 
-    // Convert CString to char* - Performance optimization: reuse CT2A
     CT2A hostA(mqttIp);
     char* mqtt_host = strdup(hostA);
-    char* mqtt_topic = strdup("+");  // Subscribe to all topics
+    char* mqtt_topic = strdup("+");
     int mqtt_port = mqttPort;
     int mqtt_keepalive = mqttKeepAlive;
 
-    int mdelay = 0;
     bool clean_session = true;
     struct mosquitto* mosq = NULL;
 
-    // 파싱 통계 초기화
-    m_nParsedCount = 0;
-    m_nTotalCount = 0;
-
+    // Mosquitto 초기화
     mosquitto_lib_init();
     mosq = mosquitto_new(NULL, clean_session, NULL);
-    if (!mosq)
-    {
+
+    if (!mosq) {
         TRACE("mosquitto structure creation failed\n");
         nErrorCode = -1;
     }
     else {
-        TRACE("mosquitto structure creation success\n");
+        TRACE("mosquitto structure creation successful\n");
+
+        // 콜백 함수 등록
+        mosquitto_connect_callback_set(mosq, connect_callback);
+        mosquitto_message_callback_set(mosq, message_callback);
+        mosquitto_subscribe_callback_set(mosq, subscribe_callback);
+
+        // 사용자 데이터 설정 (this 포인터)
+        mosquitto_user_data_set(mosq, this);
     }
-    
-    // 콜백 함수 등록
-    mosquitto_connect_callback_set(mosq, connect_callback);
-    mosquitto_message_callback_set(mosq, message_callback);
-    mosquitto_subscribe_callback_set(mosq, subscribe_callback);
-    
+
     TRACE("MQTT broker connection attempt: %s:%d\n", mqtt_host, mqtt_port);
-    
-    if (mosquitto_connect(mosq, mqtt_host, mqtt_port, mqtt_keepalive))
-    {
+
+    if (mosquitto_connect(mosq, mqtt_host, mqtt_port, mqtt_keepalive)) {
         TRACE("MQTT broker connection failed\n");
         nErrorCode = -2;
     }
     else {
         TRACE("MQTT broker connection request sent\n");
     }
-    
+
     TRACE("MQTT topic subscription attempt: '%s'\n", mqtt_topic);
     int subscribe_result = mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
     if (subscribe_result == MOSQ_ERR_SUCCESS) {
-        TRACE("MQTT subscription request sent successfully\n");
-    } else {
+        TRACE("MQTT subscription request successful\n");
+    }
+    else {
         TRACE("MQTT subscription request failed: %d\n", subscribe_result);
     }
-    
-    mosquitto_user_data_set(mosq, this);
 
-    // Result manager
-    CJsonResultManager& resultManager = CJsonResultManager::GetInstance();
-
-    CT2A ipA_log(mqttIp);
-    TRACE("MQTT Configuration - IP: %s, Port: %d, Keep-Alive: %d\n",
-        ipA_log.m_psz, mqttPort, mqttKeepAlive);
-
+    // 메인 루프
+    TRACE("Main loop started\n");
     while (!m_bEndThread)
     {
         dwCur = GetTickCount();
 
-        // MQTT 메시지 처리
+        // MQTT 메시지 처리 (논블로킹)
         nNetworkLoop = mosquitto_loop(mosq, 1, 1);
-        if (nNetworkLoop != MOSQ_ERR_SUCCESS)
-        {
+        if (nNetworkLoop != MOSQ_ERR_SUCCESS) {
             TRACE("mosquitto_loop error: %d\n", nNetworkLoop);
             Sleep(1000);
             mosquitto_reconnect(mosq);
         }
 
-        // UI 업데이트 주기 제어 (500ms마다)
-        if (dwCur - dwOld > 500)
-        {
+        // 주기적 상태 체크 (5초마다)
+        if (dwCur - dwOld > 5000) {
             dwOld = dwCur;
-            
+
+            // 큐 상태 출력
+            if (m_pMessageQueue) {
+                size_t queueSize = m_pMessageQueue->Size();
+                TRACE("Queue status check - Size: %d, Total processed: %d\n",
+                    queueSize, GetTotalProcessedCount());
+
+                // 큐가 너무 커지면 경고
+                if (queueSize > 3000) {
+                    TRACE("Warning: Message queue very large! (%d)\n", queueSize);
+                }
+            }
+
             // 통계 업데이트
-            UpdateStats(m_nParsedCount, m_nTotalCount);
+            UpdateStats(GetTotalProcessedCount(), m_nTotalCount);
+
+            // 워커 스레드 상태 출력
+            PrintThreadStatus();
         }
 
-        // 부하 감소를 위한 작은 지연
+        // CPU 사용률 조절
         Sleep(1);
     }
 
-    // 정리
+    // 정리 작업들은 그대로...
+    TRACE("Main loop terminated\n");
+
     if (mosq) {
         mosquitto_disconnect(mosq);
         mosquitto_destroy(mosq);
+        TRACE("MQTT connection closed\n");
     }
     mosquitto_lib_cleanup();
+
+    DestroyWorkerThreads();
+
+    if (m_pMessageQueue) {
+        delete m_pMessageQueue;
+        m_pMessageQueue = nullptr;
+        TRACE("Message queue cleanup completed\n");
+    }
 
     if (mqtt_host) free(mqtt_host);
     if (mqtt_topic) free(mqtt_topic);
 
-    TRACE("<<<<End Loop\n");
+    TRACE("=== ThreadSub Terminated ===\n");
     return 0;
+}
+
+void CThreadSub::CreateWorkerThreads()
+{
+    TRACE("=== Worker Thread Creation Started ===\n");
+    TRACE("m_workerThreadCount = %d\n", m_workerThreadCount);
+    TRACE("m_pMessageQueue = %p\n", m_pMessageQueue);
+    TRACE("m_pOwner = %p\n", m_pOwner);
+
+    m_workerThreads.clear();
+
+    for (int i = 0; i < m_workerThreadCount; i++)
+    {
+        TRACE("Creating worker thread %d...\n", i + 1);
+
+        try {
+            CMqttWorkerThread* pWorker = (CMqttWorkerThread*)AfxBeginThread(
+                RUNTIME_CLASS(CMqttWorkerThread),
+                THREAD_PRIORITY_NORMAL,
+                0,
+                CREATE_SUSPENDED  // 중단된 상태로 생성
+            );
+
+            if (pWorker) {
+                TRACE("Worker thread %d object created, setting properties...\n", i + 1);
+
+                // 스레드 시작 전에 모든 속성 설정
+                pWorker->SetMessageQueue(m_pMessageQueue);
+                pWorker->SetOwner(m_pOwner);
+                pWorker->SetWorkerID(i + 1);
+                pWorker->SetBatchSize(30);
+                pWorker->SetBatchTimeout(100);
+
+                TRACE("Worker thread %d properties set, resuming thread...\n", i + 1);
+
+                // 스레드 시작
+                DWORD resumeResult = pWorker->ResumeThread();
+                TRACE("Worker thread %d ResumeThread result: %d\n", i + 1, resumeResult);
+
+                // 스레드가 실제로 시작될 시간 주기
+                Sleep(50);
+
+                // 스레드 상태 확인
+                DWORD exitCode;
+                if (GetExitCodeThread(pWorker->m_hThread, &exitCode)) {
+                    if (exitCode == STILL_ACTIVE) {
+                        TRACE("Worker thread %d is running (STILL_ACTIVE)\n", i + 1);
+                    }
+                    else {
+                        TRACE("WARNING: Worker thread %d already exited with code %d\n", i + 1, exitCode);
+                    }
+                }
+                else {
+                    TRACE("ERROR: Cannot get thread status for worker %d\n", i + 1);
+                }
+
+                m_workerThreads.push_back(pWorker);
+
+                TRACE("Worker thread %d created successfully (TID: %d)\n",
+                    i + 1, pWorker->m_nThreadID);
+            }
+            else {
+                TRACE("ERROR: AfxBeginThread returned NULL for worker %d\n", i + 1);
+            }
+        }
+        catch (const std::exception& e) {
+            TRACE("Exception during worker thread %d creation: %s\n", i + 1, e.what());
+        }
+        catch (...) {
+            TRACE("Unknown exception during worker thread %d creation\n", i + 1);
+        }
+    }
+
+    TRACE("Worker thread creation completed - Total: %d\n", m_workerThreads.size());
+
+    // 모든 워커가 실제로 시작되었는지 한번 더 확인
+    Sleep(200);
+    TRACE("Final check - verifying all workers are still running...\n");
+
+    for (size_t i = 0; i < m_workerThreads.size(); i++) {
+        CMqttWorkerThread* pWorker = m_workerThreads[i];
+        if (pWorker) {
+            DWORD exitCode;
+            if (GetExitCodeThread(pWorker->m_hThread, &exitCode)) {
+                if (exitCode == STILL_ACTIVE) {
+                    TRACE("Worker %d: Still running\n", i + 1);
+                }
+                else {
+                    TRACE("WARNING: Worker %d has exited with code %d\n", i + 1, exitCode);
+                }
+            }
+        }
+    }
+}
+
+void CThreadSub::DestroyWorkerThreads()
+{
+    TRACE("=== Worker Thread Termination Started ===\n");
+
+    // Send shutdown signal to message queue
+    if (m_pMessageQueue) {
+        m_pMessageQueue->Shutdown();
+        TRACE("Message queue shutdown signal sent\n");
+    }
+
+    // Send termination signal to all worker threads
+    for (auto* pWorker : m_workerThreads)
+    {
+        if (pWorker) {
+            pWorker->Stop();
+        }
+    }
+
+    // Wait for worker threads to terminate
+    for (int i = 0; i < (int)m_workerThreads.size(); i++)
+    {
+        CMqttWorkerThread* pWorker = m_workerThreads[i];
+        if (!pWorker) continue;
+
+        TRACE("Waiting for worker thread %d to terminate...\n", i + 1);
+
+        DWORD dwExitCode;
+        int waitCount = 0;
+        const int MAX_WAIT_COUNT = 100; // Wait 10 seconds (100 * 100ms)
+
+        while (waitCount < MAX_WAIT_COUNT)
+        {
+            if (GetExitCodeThread(pWorker->m_hThread, &dwExitCode))
+            {
+                if (dwExitCode != STILL_ACTIVE) {
+                    TRACE("Worker thread %d terminated normally\n", i + 1);
+                    break;
+                }
+            }
+            else {
+                TRACE("Worker thread %d status check failed\n", i + 1);
+                break;
+            }
+
+            Sleep(100);
+            waitCount++;
+        }
+
+        if (waitCount >= MAX_WAIT_COUNT) {
+            TRACE("Warning: Worker thread %d termination timeout\n", i + 1);
+        }
+
+        // Memory cleanup
+        delete pWorker;
+    }
+
+    m_workerThreads.clear();
+    TRACE("Worker thread termination completed\n");
+}
+
+void CThreadSub::PrintThreadStatus()
+{
+    if (m_workerThreads.empty()) return;
+
+    TRACE("=== Thread Status ===\n");
+    TRACE("Message queue size: %d\n", GetTotalQueueSize());
+    TRACE("Total processed messages: %d\n", GetTotalProcessedCount());
+
+    for (int i = 0; i < (int)m_workerThreads.size(); i++)
+    {
+        CMqttWorkerThread* pWorker = m_workerThreads[i];
+        if (pWorker) {
+            TRACE("Worker %d: Processed=%d, Success=%d, Failed=%d\n",
+                i + 1,
+                pWorker->GetProcessedCount(),
+                pWorker->GetSuccessCount(),
+                pWorker->GetErrorCount());
+        }
+    }
+    TRACE("=====================\n");
+}
+
+int CThreadSub::GetTotalQueueSize() const
+{
+    return m_pMessageQueue ? (int)m_pMessageQueue->Size() : 0;
+}
+
+int CThreadSub::GetTotalProcessedCount() const
+{
+    int totalProcessed = 0;
+    for (const auto* pWorker : m_workerThreads)
+    {
+        if (pWorker) {
+            totalProcessed += pWorker->GetProcessedCount();
+        }
+    }
+    return totalProcessed;
 }

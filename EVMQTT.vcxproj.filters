@@ -63,6 +63,12 @@
     <ClInclude Include="JsonPathUtil.h">
       <Filter>JSON</Filter>
     </ClInclude>
+    <ClInclude Include="MqttMessageQueue.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="MqttWorkerThread.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="EVMQTT.cpp">
@@ -88,6 +94,9 @@
     </ClCompile>
     <ClCompile Include="JsonPathUtil.cpp">
       <Filter>JSON</Filter>
+    </ClCompile>
+    <ClCompile Include="MqttWorkerThread.cpp">
+      <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -29,9 +29,6 @@ public:
 	bool LoadTagMappings();
 	bool SaveTagMappings();
 
-	// 기본 태그 매핑 생성
-	void CreateDefaultTagMappings();
-
 	// 태그 매핑 삭제
 	void RemoveTagMapping(const CString& tagName);
 
