@@ -2,6 +2,9 @@
 
 #include "ThreadSub.h"
 
+// 전방 선언
+class CConfigDlg;
+
 // 디버그 로그 항목 구조체
 struct DebugLogItem
 {
@@ -65,6 +68,7 @@ protected:
 
 public:
 	afx_msg void OnBnClickedBtnSub();
+	afx_msg void OnBnClickedBtnConfig();
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnBnClickedCancel();
 

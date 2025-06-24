@@ -10,4 +10,4 @@ trim_trailing_whitespace = true
 
 # cpp, h 에 적용
 [*.{cpp,h}]
-charset = utf-8
+charset = utf-8-bom

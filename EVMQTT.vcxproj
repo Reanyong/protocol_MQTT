@@ -204,6 +204,7 @@
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="ConfigDlg.h" />
     <ClInclude Include="ConfigManager.h" />
     <ClInclude Include="ErrorMessages.h" />
     <ClInclude Include="framework.h" />
@@ -220,6 +221,7 @@
     <ClInclude Include="ThreadSub.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="ConfigDlg.cpp" />
     <ClCompile Include="MqttWorkerThread.cpp" />
     <ClCompile Include="ConfigManager.cpp" />
     <ClCompile Include="JsonResultManager.cpp" />

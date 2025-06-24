@@ -2,6 +2,7 @@
 #include "framework.h"
 #include "EVMQTT.h"
 #include "EVMQTTDlg.h"
+#include "ConfigDlg.h"
 #include "afxdialogex.h"
 #include "ConfigManager.h"
 
@@ -72,6 +73,7 @@ BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
 	ON_MESSAGE(WM_USER + 100, OnUpdateStats)
 	//ON_BN_CLICKED(IDC_BUTTON_CLEAR_LOG, &CEVMQTTDlg::OnBnClickedButtonClearLog)
 	ON_MESSAGE(WM_USER + 101, OnUpdateDebugLog)
+	ON_BN_CLICKED(IDC_BTN_CONFIG, &CEVMQTTDlg::OnBnClickedBtnConfig)
 END_MESSAGE_MAP()
 
 
@@ -524,7 +526,7 @@ LRESULT CEVMQTTDlg::OnUpdateDebugLog(WPARAM wParam, LPARAM lParam)
 	dbgMsg.Format(_T("OnUpdateDebugLog 호출 횟수: %d\n"), callCount);
 	OutputDebugString(dbgMsg);
 
-	UpdateDebugList();
+	//UpdateDebugList();
 	return 0;
 }
 
@@ -541,4 +543,54 @@ void CEVMQTTDlg::SetDebugLogFilter(bool showInfo, bool showSuccess, bool showWar
 		// 필터 변경 시 리스트 업데이트
 		PostMessage(WM_USER + 101, 0, 0);
 	}
+}
+
+
+void CEVMQTTDlg::OnBnClickedBtnConfig()
+{
+	// 통신 중인 경우 경고 메시지
+	if (m_pThreadSub != nullptr)
+	{
+		if (AfxMessageBox(_T("통신 중에는 설정을 변경할 수 없습니다.\n통신을 중지하고 설정을 열까요?"), 
+			MB_YESNO | MB_ICONQUESTION) == IDYES)
+		{
+			// 통신 중지
+			StopThreadSub();
+			DeleteThreadSub();
+			
+			// 버튼 텍스트 변경
+			CWnd* pBtn = GetDlgItem(IDC_BTN_SUB);
+			if (pBtn)
+			{
+				pBtn->SetWindowText(_T("통신 시작"));
+			}
+		}
+		else
+		{
+			return; // 사용자가 취소하면 설정 다이얼로그를 열지 않음
+		}
+	}
+
+	// 임시로 메시지박스로 설정 화면 구현
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	configManager.LoadConfig();
+	
+	CString currentConfig;
+	currentConfig.Format(_T("현재 MQTT 설정:\n\n")
+		_T("IP: %s\n")
+		_T("Port: %d\n")
+		_T("Keep Alive: %d\n")
+		_T("파싱 주기: %d ms\n\n")
+		_T("태그 그룹: %s\n\n")
+		_T("설정 다이얼로그 UI는 Visual Studio에서\n")
+		_T("리소스 에디터로 추가해주세요."),
+		configManager.GetMqttIp(),
+		configManager.GetMqttPort(),
+		configManager.GetMqttKeepAlive(),
+		configManager.GetParsingInterval(),
+		configManager.GetTagGroup());
+	
+	AfxMessageBox(currentConfig, MB_OK | MB_ICONINFORMATION);
+	
+	AddDebugLog(_T("설정 버튼이 클릭되었습니다."), _T(""), DebugLogItem::LOG_INFO);
 }
