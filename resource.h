@@ -10,11 +10,16 @@
 #define IDR_MAINFRAME                   104
 #define IDC_BTN_SUB                     105
 #define IDC_STATIC_STATS                106
+#define IDC_STC_MQTT_STATUS             106
 #define IDC_LIST_DEBUG                  107
+#define IDC_LIST_ACTIVITY               107
 #define IDC_BTN_CONFIG                  108
 #define IDC_EDIT_MQTT_IP                109
+#define IDC_STC_TAG_INFO                109
 #define IDC_EDIT_MQTT_PORT              110
+#define IDC_STC_PERFORMANCE             110
 #define IDC_EDIT_MQTT_KEEPALIVE         111
+#define IDC_STC_ACTIVITY_LABEL          111
 #define IDC_EDIT_PARSING_INTERVAL       112
 #define IDC_LIST_TAG_CONFIG             113
 #define IDC_BTN_ADD_TAG                 114

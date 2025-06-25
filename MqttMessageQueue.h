@@ -1,4 +1,4 @@
-// MqttMessageQueue.h
+﻿// MqttMessageQueue.h
 #pragma once
 #include <queue>
 #include <mutex>

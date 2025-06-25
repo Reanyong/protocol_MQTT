@@ -29,11 +29,18 @@ public:
 	bool LoadTagMappings();
 	bool SaveTagMappings();
 
+	// 태그 매핑 추가/수정
+	void AddTagMapping(const CString& tagName, const CString& mapping);
+	void SetTagMapping(const CString& tagName, const CString& mapping);
+
 	// 태그 매핑 삭제
 	void RemoveTagMapping(const CString& tagName);
 
 	// 태그 매핑 존재 여부 확인
 	bool HasTagMapping(const CString& tagName) const;
+
+	// 특정 태그 매핑 조회
+	CString GetTagMapping(const CString& tagName) const;
 
 	// MQTT 설정
 	void SetMqttIp(const CString& ip);
@@ -53,4 +60,7 @@ private:
 	int m_mqttPort;
 	int m_mqttKeepAlive;
 	std::map<CString, CString> m_tagMappings;  // 태그명 -> JSONPath 매핑
+
+	// 내부 헬퍼 메서드
+	CString GetIniFilePath() const;
 };

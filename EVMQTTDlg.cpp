@@ -10,20 +10,18 @@
 #define new DEBUG_NEW
 #endif
 
-
 // 응용 프로그램 정보에 사용되는 CAboutDlg 대화 상자입니다.
-
 class CAboutDlg : public CDialogEx
 {
 public:
 	CAboutDlg();
 
-// 대화 상자 데이터입니다.
+	// 대화 상자 데이터입니다.
 #ifdef AFX_DESIGN_TIME
 	enum { IDD = IDD_ABOUTBOX };
 #endif
 
-	protected:
+protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV 지원입니다.
 
 // 구현입니다.
@@ -50,17 +48,26 @@ CEVMQTTDlg::CEVMQTTDlg(CWnd* pParent /*=nullptr*/)
 
 	m_pThreadSub = NULL;
 
-	m_showInfoLogs = false;
-	m_showSuccessLogs = false;
-	m_showWarningLogs = true;
-	m_showErrorLogs = true;
+	// 상태 정보 초기화
+	m_bMqttConnected = false;
+	m_strMqttHost = _T("");
+	m_nMqttPort = 0;
+	m_nActiveTagCount = 0;
+	m_nTotalTagCount = 0;
+	m_nMessagesPerSec = 0;
+	m_nSuccessRate = 0;
+	m_dwLastUpdateTime = GetTickCount();
+	m_nLastProcessedCount = 0;
 }
 
 void CEVMQTTDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
-	DDX_Control(pDX, IDC_STATIC_STATS, m_staticStats);
-	DDX_Control(pDX, IDC_LIST_DEBUG, m_listDebug);
+	DDX_Control(pDX, IDC_STC_MQTT_STATUS, m_staticMqttStatus);
+	DDX_Control(pDX, IDC_STC_TAG_INFO, m_staticTagInfo);
+	DDX_Control(pDX, IDC_STC_PERFORMANCE, m_staticPerformance);
+	DDX_Control(pDX, IDC_STC_ACTIVITY_LABEL, m_staticActivityLabel);
+	DDX_Control(pDX, IDC_LIST_ACTIVITY, m_listActivity);
 }
 
 BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
@@ -71,11 +78,9 @@ BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
 	ON_BN_CLICKED(IDOK, &CEVMQTTDlg::OnBnClickedOk)
 	ON_BN_CLICKED(IDCANCEL, &CEVMQTTDlg::OnBnClickedCancel)
 	ON_MESSAGE(WM_USER + 100, OnUpdateStats)
-	//ON_BN_CLICKED(IDC_BUTTON_CLEAR_LOG, &CEVMQTTDlg::OnBnClickedButtonClearLog)
-	ON_MESSAGE(WM_USER + 101, OnUpdateDebugLog)
+	ON_MESSAGE(WM_USER + 102, OnUpdateActivityLog)
 	ON_BN_CLICKED(IDC_BTN_CONFIG, &CEVMQTTDlg::OnBnClickedBtnConfig)
 END_MESSAGE_MAP()
-
 
 // CEVMQTTDlg 메시지 처리기
 
@@ -84,8 +89,6 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	CDialogEx::OnInitDialog();
 
 	// 시스템 메뉴에 "정보..." 메뉴 항목을 추가합니다.
-
-	// IDM_ABOUTBOX는 시스템 명령 범위에 있어야 합니다.
 	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
 	ASSERT(IDM_ABOUTBOX < 0xF000);
 
@@ -103,22 +106,23 @@ BOOL CEVMQTTDlg::OnInitDialog()
 		}
 	}
 
-	// 이 대화 상자의 아이콘을 설정합니다.  응용 프로그램의 주 창이 대화 상자가 아닐 경우에는
-	//  프레임워크가 이 작업을 자동으로 수행합니다.
+	// 이 대화 상자의 아이콘을 설정합니다.
 	SetIcon(m_hIcon, TRUE);			// 큰 아이콘을 설정합니다.
 	SetIcon(m_hIcon, FALSE);		// 작은 아이콘을 설정합니다.
 
-	m_nParsedCount = 0;
-	m_nTotalCount = 0;
-	UpdateParsingStats(0, 0);
+	// 새로운 UI 초기화
+	InitStatusControls();
+	InitActivityList();
 
-	SetDebugLogFilter(false, false, true, true);
+	// 초기 상태 설정
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	configManager.LoadConfig();
 
-	InitDebugList();
+	UpdateMqttStatus(false, configManager.GetMqttIp(), configManager.GetMqttPort());
+	UpdateTagInfo(0, configManager.GetAllTagMappings().size());
+	UpdatePerformance(0, 0);
 
-	AddDebugLog(_T("프로그램 시작"), _T(""), DebugLogItem::LOG_INFO);
-
-	// TODO: 여기에 추가 초기화 작업을 추가합니다.
+	AddActivityLog(_T("시스템"), _T("프로그램 시작"), ActivityLogItem::LOG_INFO, _T("준비"));
 
 	return TRUE;  // 포커스를 컨트롤에 설정하지 않으면 TRUE를 반환합니다.
 }
@@ -135,10 +139,6 @@ void CEVMQTTDlg::OnSysCommand(UINT nID, LPARAM lParam)
 		CDialogEx::OnSysCommand(nID, lParam);
 	}
 }
-
-// 대화 상자에 최소화 단추를 추가할 경우 아이콘을 그리려면
-//  아래 코드가 필요합니다.  문서/뷰 모델을 사용하는 MFC 애플리케이션의 경우에는
-//  프레임워크에서 이 작업을 자동으로 수행합니다.
 
 void CEVMQTTDlg::OnPaint()
 {
@@ -165,24 +165,9 @@ void CEVMQTTDlg::OnPaint()
 	}
 }
 
-// 사용자가 최소화된 창을 끄는 동안에 커서가 표시되도록 시스템에서
-//  이 함수를 호출합니다.
 HCURSOR CEVMQTTDlg::OnQueryDragIcon()
 {
 	return static_cast<HCURSOR>(m_hIcon);
-}
-
-void PeekMessages()
-{
-	MSG msg;
-	while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-	{
-		//    if(!IsDialogMessage(&msg))
-		{
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-	}
 }
 
 void CEVMQTTDlg::OnBnClickedBtnSub()
@@ -209,7 +194,6 @@ void CEVMQTTDlg::OnBnClickedOk()
 {
 	StopThreadSub();
 	DeleteThreadSub();
-
 	CDialogEx::OnOK();
 }
 
@@ -217,7 +201,6 @@ void CEVMQTTDlg::OnBnClickedCancel()
 {
 	StopThreadSub();
 	DeleteThreadSub();
-
 	CDialogEx::OnCancel();
 }
 
@@ -225,24 +208,18 @@ void CEVMQTTDlg::BeginThreadSub()
 {
 	if (m_pThreadSub == NULL)
 	{
-		m_nParsedCount = 0;
-		m_nTotalCount = 0;
-		UpdateParsingStats(0, 0);
-
 		// 스레드 생성
 		m_pThreadSub = (CThreadSub*)AfxBeginThread(RUNTIME_CLASS(CThreadSub),
 			THREAD_PRIORITY_HIGHEST, 0, CREATE_SUSPENDED);
 		m_pThreadSub->m_pOwner = this;
 
-		// 초기 통계 설정
-		m_nTotalCount = 0;
-		UpdateParsingStats(m_nParsedCount, m_nTotalCount);
-
 		// 스레드 시작
 		m_pThreadSub->ResumeThread();
 
-		// 로그 추가
-		AddDebugLog(_T("통신 시작"), _T(""), DebugLogItem::LOG_INFO);
+		// 연결 상태 업데이트
+		CConfigManager& configManager = CConfigManager::GetInstance();
+		UpdateMqttStatus(true, configManager.GetMqttIp(), configManager.GetMqttPort());
+		AddActivityLog(_T("MQTT"), _T("연결 시도"), ActivityLogItem::LOG_CONNECTION, _T("진행중"));
 	}
 }
 
@@ -250,23 +227,18 @@ void CEVMQTTDlg::StopThreadSub()
 {
 	if (m_pThreadSub != NULL)
 	{
-#ifndef _DEBUG
 		try
 		{
-#endif
-			// 종료 메시지 전송
 			PostThreadMessage(m_pThreadSub->m_nThreadID, WM_QUIT, 0, 0);
 			m_pThreadSub->Stop();
 
-			// 로그 추가
-			AddDebugLog(_T("통신 종료"), _T(""), DebugLogItem::LOG_INFO);
-#ifndef _DEBUG
+			UpdateMqttStatus(false, m_strMqttHost, m_nMqttPort);
+			AddActivityLog(_T("MQTT"), _T("연결 종료"), ActivityLogItem::LOG_CONNECTION, _T("종료"));
 		}
 		catch (...)
 		{
 			ASSERT(FALSE);
 		}
-#endif
 	}
 }
 
@@ -274,15 +246,12 @@ void CEVMQTTDlg::DeleteThreadSub()
 {
 	if (m_pThreadSub != NULL)
 	{
-#ifndef _DEBUG
 		try
 		{
-#endif
 			int n = 0;
 			DWORD dwExitCode;
 			m_pThreadSub->Stop();
-			
-			// 성능 최적화: 적응형 대기시간과 더 빠른 종료
+
 			while (true)
 			{
 				if (GetExitCodeThread(m_pThreadSub->m_hThread, &dwExitCode))
@@ -291,273 +260,282 @@ void CEVMQTTDlg::DeleteThreadSub()
 						break;
 				}
 				else break;
-				
-				// 적응형 대기: 처음엔 짧게, 점점 길게
+
 				int sleepTime = (n < 10) ? 1 : (n < 50) ? 5 : 10;
 				Sleep(sleepTime);
-
 				n++;
 
-				if (n > 200)  // 최대 대기시간 단축 (500 -> 200)
+				if (n > 200)
 					break;
 			}
 
 			delete m_pThreadSub;
 			m_pThreadSub = NULL;
-#ifndef _DEBUG
 		}
 		catch (...)
 		{
 			ASSERT(FALSE);
 		}
-#endif
 	}
 }
 
-// 통계 업데이트 메서드 구현
-void CEVMQTTDlg::UpdateParsingStats(int parsedCount, int totalCount)
+// ===============================
+// 새로운 UI 관련 함수들
+// ===============================
+
+void CEVMQTTDlg::InitStatusControls()
 {
-	m_nParsedCount = parsedCount;
-	m_nTotalCount = totalCount;
+	// 활동 라벨 설정
+	m_staticActivityLabel.SetWindowText(_T("최근 활동"));
 
-	TRACE("UpdateParsingStats: m_nParsedCount=%d, m_nTotalCount=%d\n", m_nParsedCount, m_nTotalCount);
-
-	CString statsText;
-	statsText.Format(_T("json 파싱 결과: %ld / %ld"), (long)m_nParsedCount, (long)m_nTotalCount);
-	// 또는 다른 방식으로 시도:
-	// CString statsText;
-	// statsText.Format(_T("json 파싱 결과: %d / %d"), (int)m_nParsedCount, (int)m_nTotalCount);
-
-	TRACE("statsText: %s\n", (LPCTSTR)statsText);
-
-	// 컨트롤이 있는지 확인하고 텍스트 설정
-	if (::IsWindow(m_staticStats.GetSafeHwnd()))
+	// 폰트 설정 (선택사항)
+	CFont* pFont = GetFont();
+	if (pFont)
 	{
-		m_staticStats.SetWindowText(statsText);
+		m_staticMqttStatus.SetFont(pFont);
+		m_staticTagInfo.SetFont(pFont);
+		m_staticPerformance.SetFont(pFont);
+	}
 
-		// 강제 갱신 시도
-		m_staticStats.Invalidate();
-		m_staticStats.UpdateWindow();
+	TRACE("상태 컨트롤 초기화 완료\n");
+}
+
+void CEVMQTTDlg::InitActivityList()
+{
+	if (!::IsWindow(m_listActivity.GetSafeHwnd())) {
+		TRACE("활동 리스트 컨트롤이 유효하지 않습니다.\n");
+		return;
+	}
+
+	// 기존 컬럼 삭제
+	while (m_listActivity.DeleteColumn(0));
+
+	// 확장 스타일 설정
+	DWORD dwStyle = m_listActivity.GetExtendedStyle();
+	m_listActivity.SetExtendedStyle(dwStyle | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+
+	// 컬럼 추가
+	m_listActivity.InsertColumn(0, _T("시간"), LVCFMT_LEFT, 80);
+	m_listActivity.InsertColumn(1, _T("태그명"), LVCFMT_LEFT, 120);
+	m_listActivity.InsertColumn(2, _T("값"), LVCFMT_LEFT, 150);
+	m_listActivity.InsertColumn(3, _T("상태"), LVCFMT_CENTER, 60);
+
+	TRACE("활동 리스트 초기화 완료\n");
+}
+
+void CEVMQTTDlg::UpdateMqttStatus(bool connected, const CString& host, int port)
+{
+	m_bMqttConnected = connected;
+	m_strMqttHost = host;
+	m_nMqttPort = port;
+
+	CString statusText;
+	if (connected)
+	{
+		statusText.Format(_T("MQTT 브로커: 연결됨 (%s:%d)"), host, port);
 	}
 	else
 	{
-		TRACE("m_staticStats is not a valid window!\n");
+		statusText = _T("MQTT 브로커: 연결 안됨");
+	}
+
+	m_staticMqttStatus.SetWindowText(statusText);
+	TRACE("MQTT 상태 업데이트: %s\n", (LPCTSTR)statusText);
+}
+
+void CEVMQTTDlg::UpdateTagInfo(int activeTagCount, int totalTagCount)
+{
+	m_nActiveTagCount = activeTagCount;
+	m_nTotalTagCount = totalTagCount;
+
+	CString statusText;
+	statusText.Format(_T("태그 매핑: %d개 활성"), activeTagCount);
+	if (totalTagCount > 0)
+	{
+		statusText.AppendFormat(_T(" / %d개 전체"), totalTagCount);
+	}
+
+	m_staticTagInfo.SetWindowText(statusText);
+}
+
+void CEVMQTTDlg::UpdatePerformance(int messagesPerSec, int successRate)
+{
+	m_nMessagesPerSec = messagesPerSec;
+	m_nSuccessRate = successRate;
+
+	CString statusText;
+	statusText.Format(_T("처리 속도: %d msg/sec"), messagesPerSec);
+	if (successRate >= 0)
+	{
+		statusText.AppendFormat(_T(" (성공률 %d%%)"), successRate);
+	}
+
+	m_staticPerformance.SetWindowText(statusText);
+}
+
+void CEVMQTTDlg::AddActivityLog(const CString& tagName, const CString& value,
+	ActivityLogItem::LogType type, const CString& status)
+{
+	CSingleLock lock(&m_activityMutex, TRUE);
+	if (!lock.IsLocked()) return;
+
+	ActivityLogItem logItem;
+
+	// 명시적으로 각 필드 설정
+	logItem.tagName = tagName;
+	logItem.value = value;
+	logItem.type = type;
+	logItem.status = status;
+	logItem.fullTime = CTime::GetCurrentTime();
+	logItem.timestamp = logItem.fullTime.Format(_T("%H:%M:%S"));
+
+	// 즉시 디버깅 출력
+	TRACE("=== AddActivityLog ===\n");
+	TRACE("Input - Tag=[%s], Value=[%s], Status=[%s], Type=%d\n",
+		(LPCTSTR)tagName, (LPCTSTR)value, (LPCTSTR)status, (int)type);
+	TRACE("LogItem - Tag=[%s], Value=[%s], Status=[%s], Type=%d\n",
+		(LPCTSTR)logItem.tagName, (LPCTSTR)logItem.value, (LPCTSTR)logItem.status, (int)logItem.type);
+
+	// 벡터에 추가하기 전에 한번 더 체크
+	m_activityLogs.push_back(logItem);
+
+	// 추가 후 바로 체크
+	if (!m_activityLogs.empty()) {
+		const auto& lastItem = m_activityLogs.back();
+		TRACE("Vector LastItem - Tag=[%s], Value=[%s], Status=[%s]\n",
+			(LPCTSTR)lastItem.tagName, (LPCTSTR)lastItem.value, (LPCTSTR)lastItem.status);
+	}
+
+	// 로그 개수 제한
+	TrimActivityLogs();
+
+	// UI 업데이트 (비동기)
+	PostMessage(WM_USER + 102, 0, 0);
+}
+
+void CEVMQTTDlg::UpdateActivityList()
+{
+	if (!::IsWindow(m_listActivity.GetSafeHwnd())) return;
+
+	CSingleLock lock(&m_activityMutex, TRUE);
+	if (!lock.IsLocked()) return;
+
+	m_listActivity.DeleteAllItems();
+
+	// 최신 로그부터 표시 (역순)
+	int itemCount = 0;
+	for (int i = (int)m_activityLogs.size() - 1; i >= 0 && itemCount < 50; i--, itemCount++)
+	{
+		const ActivityLogItem& logItem = m_activityLogs[i];
+
+		int nItem = m_listActivity.InsertItem(itemCount, logItem.timestamp);
+		if (nItem >= 0)
+		{
+			m_listActivity.SetItemText(nItem, 1, logItem.tagName);
+			m_listActivity.SetItemText(nItem, 2, logItem.value);
+			m_listActivity.SetItemText(nItem, 3, logItem.status);  // status 필드 사용 (올바름)
+
+			// 디버그 출력으로 확인
+			TRACE("Activity Log[%d]: Time=%s, Tag=%s, Value=%s, Status=%s\n",
+				nItem, (LPCTSTR)logItem.timestamp, (LPCTSTR)logItem.tagName,
+				(LPCTSTR)logItem.value, (LPCTSTR)logItem.status);
+		}
+	}
+
+	// 첫 번째 항목으로 스크롤
+	if (m_listActivity.GetItemCount() > 0)
+	{
+		m_listActivity.EnsureVisible(0, FALSE);
 	}
 }
 
-// 메시지 핸들러 구현
+void CEVMQTTDlg::TrimActivityLogs()
+{
+	while (m_activityLogs.size() > MAX_ACTIVITY_LOGS)
+	{
+		m_activityLogs.erase(m_activityLogs.begin());
+	}
+}
+
+COLORREF CEVMQTTDlg::GetStatusColor(bool isGood)
+{
+	return isGood ? RGB(0, 128, 0) : RGB(255, 0, 0);  // 녹색 또는 빨간색
+}
+
+// ===============================
+// 메시지 핸들러
+// ===============================
+
 LRESULT CEVMQTTDlg::OnUpdateStats(WPARAM wParam, LPARAM lParam)
 {
 	int parsedCount = (int)wParam;
 	int totalCount = (int)lParam;
 
-	TRACE("OnUpdateStats: parsedCount=%d, totalCount=%d\n", parsedCount, totalCount);
+	// 성능 계산
+	DWORD currentTime = GetTickCount();
+	DWORD elapsed = currentTime - m_dwLastUpdateTime;
 
-	if (m_nParsedCount != parsedCount || m_nTotalCount != totalCount) {
-		UpdateParsingStats(parsedCount, totalCount);
+	if (elapsed >= 1000)  // 1초마다 업데이트
+	{
+		int processedDiff = parsedCount - m_nLastProcessedCount;
+		int messagesPerSec = elapsed > 0 ? (processedDiff * 1000 / elapsed) : 0;
+		int successRate = totalCount > 0 ? (parsedCount * 100 / totalCount) : 0;
+
+		UpdatePerformance(messagesPerSec, successRate);
+		UpdateTagInfo(m_nActiveTagCount, m_nTotalTagCount);  // 주기적으로 갱신
+
+		m_dwLastUpdateTime = currentTime;
+		m_nLastProcessedCount = parsedCount;
 	}
+
 	return 0;
 }
 
-// 디버그 리스트 초기화
-void CEVMQTTDlg::InitDebugList()
+LRESULT CEVMQTTDlg::OnUpdateActivityLog(WPARAM wParam, LPARAM lParam)
 {
-	if (!::IsWindow(m_listDebug.GetSafeHwnd())) {
-		TRACE("리스트 컨트롤이 유효하지 않습니다.\n");
-		return;
-	}
-
-	while (m_listDebug.DeleteColumn(0));
-
-	DWORD dwStyle = m_listDebug.GetExtendedStyle();
-	m_listDebug.SetExtendedStyle(dwStyle | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
-
-	// 컬럼 추가
-	m_listDebug.InsertColumn(0, _T("파일명"), LVCFMT_LEFT, 150);
-	m_listDebug.InsertColumn(1, _T("상태"), LVCFMT_CENTER, 60);
-	m_listDebug.InsertColumn(2, _T("시간"), LVCFMT_LEFT, 70);
-	m_listDebug.InsertColumn(3, _T("메시지"), LVCFMT_LEFT, 300);
-
-	OutputDebugString(_T("디버그 리스트 초기화 완료\n"));
-}
-
-// 디버그 로그 추가
-void CEVMQTTDlg::AddDebugLog(const CString& message, const CString& filePath, DebugLogItem::LogType type)
-{
-	// 현재 필터 설정에 따라 표시 여부 결정
-	bool shouldDisplay = false;
-	switch (type) {
-	case DebugLogItem::LOG_INFO:
-		shouldDisplay = m_showInfoLogs;
-		break;
-	case DebugLogItem::LOG_SUCCESS:
-		shouldDisplay = m_showSuccessLogs;
-		break;
-	case DebugLogItem::LOG_WARNING:
-		shouldDisplay = m_showWarningLogs;
-		break;
-	case DebugLogItem::LOG_ERROR:
-		shouldDisplay = m_showErrorLogs;
-		break;
-	}
-
-	// 표시하지 않을 로그는 저장하지 않음
-	if (!shouldDisplay) {
-		return;
-	}
-
-	CSingleLock lock(&m_logMutex, TRUE);
-	if (!lock.IsLocked()) {
-		OutputDebugString(_T("로그 추가 중 뮤텍스 잠금 실패\n"));
-		return;
-	}
-
-	DebugLogItem logItem;
-	logItem.message = message;
-	logItem.filePath = filePath;
-	logItem.type = type;
-	logItem.timestamp = CTime::GetCurrentTime();
-	logItem.shouldDisplay = shouldDisplay;
-
-	m_debugLogs.push_back(logItem);
-
-	OutputDebugString(_T("로그 추가됨: "));
-	OutputDebugString(message);
-	OutputDebugString(_T("\n"));
-
-	// UI 업데이트 메시지 전송
-	PostMessage(WM_USER + 101, 0, 0);
-}
-
-// 디버그 리스트 업데이트
-void CEVMQTTDlg::UpdateDebugList()
-{
-	if (!::IsWindow(m_listDebug.GetSafeHwnd())) {
-		TRACE("리스트 컨트롤이 유효하지 않습니다.\n");
-		return;
-	}
-
-	CSingleLock lock(&m_logMutex, TRUE);
-	if (!lock.IsLocked()) {
-		TRACE("뮤텍스 잠금 실패\n");
-		return;
-	}
-
-	m_listDebug.DeleteAllItems();
-
-	// 필터링된 로그만 표시
-	int itemCount = 0;
-	for (size_t i = 0; i < m_debugLogs.size(); i++) {
-		const DebugLogItem& logItem = m_debugLogs[i];
-
-		// 표시 설정된 항목만 추가
-		if (!logItem.shouldDisplay) {
-			continue;
-		}
-
-		// 파일명 추출 (경로에서)
-		CString fileName = logItem.filePath;
-		if (!fileName.IsEmpty()) {
-			int pos = fileName.ReverseFind('\\');
-			if (pos >= 0)
-				fileName = fileName.Mid(pos + 1);
-		}
-
-		// 상태 텍스트 및 색상
-		CString strStatus;
-		COLORREF textColor = RGB(0, 0, 0);
-
-		switch (logItem.type) {
-		case DebugLogItem::LOG_INFO:
-			strStatus = _T("정보");
-			textColor = RGB(0, 0, 0); // 검은색
-			break;
-		case DebugLogItem::LOG_SUCCESS:
-			strStatus = _T("성공");
-			textColor = RGB(0, 128, 0); // 녹색
-			break;
-		case DebugLogItem::LOG_WARNING:
-			strStatus = _T("경고");
-			textColor = RGB(255, 128, 0); // 주황색
-			break;
-		case DebugLogItem::LOG_ERROR:
-			strStatus = _T("오류");
-			textColor = RGB(255, 0, 0); // 빨간색
-			break;
-		}
-
-		// 시간 포맷팅
-		CString strTime = logItem.timestamp.Format(_T("%H:%M:%S"));
-
-		// 항목 추가
-		int nItem = m_listDebug.InsertItem(itemCount++, fileName);
-		if (nItem >= 0) {
-			m_listDebug.SetItemText(nItem, 1, strStatus);
-			m_listDebug.SetItemText(nItem, 2, strTime);
-			m_listDebug.SetItemText(nItem, 3, logItem.message);
-
-			// 맨 아래로 스크롤
-			m_listDebug.EnsureVisible(nItem, FALSE);
-		}
-	}
-
-	// 화면 갱신 요청
-	m_listDebug.Invalidate();
-	m_listDebug.UpdateWindow();
-}
-
-// 로그 지우기 버튼 핸들러
-void CEVMQTTDlg::OnBnClickedButtonClearLog()
-{
-	//std::lock_guard<std::mutex> lock(m_logMutex);
-	CSingleLock lock(&m_logMutex, TRUE);
-
-	m_debugLogs.clear();
-	m_listDebug.DeleteAllItems();
-}
-
-// 디버그 로그 업데이트 메시지 핸들러
-LRESULT CEVMQTTDlg::OnUpdateDebugLog(WPARAM wParam, LPARAM lParam)
-{
-	static int callCount = 0;
-	callCount++;
-
-	CString dbgMsg;
-	dbgMsg.Format(_T("OnUpdateDebugLog 호출 횟수: %d\n"), callCount);
-	OutputDebugString(dbgMsg);
-
-	//UpdateDebugList();
+	UpdateActivityList();
 	return 0;
 }
 
-// 디버그 로그 필터 설정 메소드
-void CEVMQTTDlg::SetDebugLogFilter(bool showInfo, bool showSuccess, bool showWarning, bool showError)
-{
-	CSingleLock lock(&m_logMutex, TRUE);
-	if (lock.IsLocked()) {
-		m_showInfoLogs = showInfo;
-		m_showSuccessLogs = showSuccess;
-		m_showWarningLogs = showWarning;
-		m_showErrorLogs = showError;
+// ===============================
+// ThreadSub와의 인터페이스
+// ===============================
 
-		// 필터 변경 시 리스트 업데이트
-		PostMessage(WM_USER + 101, 0, 0);
-	}
+void CEVMQTTDlg::UpdateParsingStats(int parsedCount, int totalCount)
+{
+	// 기존 OnUpdateStats 메시지 전송
+	PostMessage(WM_USER + 100, parsedCount, totalCount);
 }
 
+void CEVMQTTDlg::OnTagUpdated(const CString& tagName, const CString& value, bool success)
+{
+	CString status = success ? _T("성공") : _T("실패");
+	TRACE("OnTagUpdated: Tag=%s, Value=%s, Success=%s, Status=%s\n",
+		(LPCTSTR)tagName, (LPCTSTR)value, success ? "true" : "false", (LPCTSTR)status);
+	AddActivityLog(tagName, value, ActivityLogItem::LOG_TAG_UPDATE, status);
+}
+
+void CEVMQTTDlg::OnMqttConnectionChanged(bool connected)
+{
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	UpdateMqttStatus(connected, configManager.GetMqttIp(), configManager.GetMqttPort());
+
+	CString status = connected ? _T("연결") : _T("끊김");
+	AddActivityLog(_T("MQTT"), configManager.GetMqttIp(), ActivityLogItem::LOG_CONNECTION, status);
+}
 
 void CEVMQTTDlg::OnBnClickedBtnConfig()
 {
 	// 통신 중인 경우 경고 메시지
 	if (m_pThreadSub != nullptr)
 	{
-		if (AfxMessageBox(_T("통신 중에는 설정을 변경할 수 없습니다.\n통신을 중지하고 설정을 열까요?"), 
+		if (AfxMessageBox(_T("통신 중에는 설정을 변경할 수 없습니다.\n통신을 중지하고 설정을 열까요?"),
 			MB_YESNO | MB_ICONQUESTION) == IDYES)
 		{
 			// 통신 중지
 			StopThreadSub();
 			DeleteThreadSub();
-			
+
 			// 버튼 텍스트 변경
 			CWnd* pBtn = GetDlgItem(IDC_BTN_SUB);
 			if (pBtn)
@@ -571,33 +549,15 @@ void CEVMQTTDlg::OnBnClickedBtnConfig()
 		}
 	}
 
-	// 임시로 메시지박스로 설정 화면 구현
-	/*
-	CConfigManager& configManager = CConfigManager::GetInstance();
-	configManager.LoadConfig();
-	
-	CString currentConfig;
-	currentConfig.Format(_T("현재 MQTT 설정:\n\n")
-		_T("IP: %s\n")
-		_T("Port: %d\n")
-		_T("Keep Alive: %d\n")
-		_T("파싱 주기: %d ms\n\n")
-		_T("태그 그룹: %s\n\n")
-		_T("설정 다이얼로그 UI는 Visual Studio에서\n")
-		_T("리소스 에디터로 추가해주세요."),
-		configManager.GetMqttIp(),
-		configManager.GetMqttPort(),
-		configManager.GetMqttKeepAlive(),
-		configManager.GetParsingInterval(),
-		configManager.GetTagGroup());
-	
-	AfxMessageBox(currentConfig, MB_OK | MB_ICONINFORMATION);
-
-	AddDebugLog(_T("설정 버튼이 클릭되었습니다."), _T(""), DebugLogItem::LOG_INFO);
-	*/
-
 	CConfigDlg configDlg(this);
 	if (configDlg.DoModal() == IDOK) {
-		AddDebugLog(_T("설정이 변경되었습니다."), _T(""), DebugLogItem::LOG_INFO);
+		// 설정이 변경된 경우 UI 업데이트
+		CConfigManager& configManager = CConfigManager::GetInstance();
+		configManager.LoadConfig();
+
+		UpdateMqttStatus(false, configManager.GetMqttIp(), configManager.GetMqttPort());
+		UpdateTagInfo(0, configManager.GetAllTagMappings().size());
+
+		AddActivityLog(_T("시스템"), _T("설정 변경"), ActivityLogItem::LOG_INFO, _T("완료"));
 	}
 }

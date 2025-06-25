@@ -1,4 +1,4 @@
-// CThreadSub.cpp : implementation file
+﻿// CThreadSub.cpp : implementation file
 //
 
 #include "pch.h"
@@ -106,11 +106,28 @@ END_MESSAGE_MAP()
 
 void connect_callback(struct mosquitto* mosq, void* obj, int result)
 {
+    CThreadSub* pThreadSub = static_cast<CThreadSub*>(obj);
+
     if (result == 0) {
         TRACE("=== MQTT Connection Success! ===\n");
+
+        // UI에 연결 성공 알림
+        if (pThreadSub && pThreadSub->m_pOwner && ::IsWindow(pThreadSub->m_pOwner->GetSafeHwnd()))
+        {
+            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)pThreadSub->m_pOwner;
+            pDlg->OnMqttConnectionChanged(true);
+        }
     }
     else {
         TRACE("=== MQTT Connection Failed! Error code: %d ===\n", result);
+
+        // UI에 연결 실패 알림
+        if (pThreadSub && pThreadSub->m_pOwner && ::IsWindow(pThreadSub->m_pOwner->GetSafeHwnd()))
+        {
+            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)pThreadSub->m_pOwner;
+            pDlg->OnMqttConnectionChanged(false);
+        }
+
         switch (result) {
         case 1: TRACE("Connection refused: bad protocol version\n"); break;
         case 2: TRACE("Connection refused: client ID rejected\n"); break;
@@ -228,9 +245,7 @@ int CThreadSub::Run()
     m_pMessageQueue = new CMqttMessageQueue(5000);
     TRACE("Message queue creation completed\n");
 
-    // 워커 스레드들 생성 - 이 부분에 강화된 디버깅 추가
-    TRACE("About to call CreateWorkerThreads()...\n");
-
+    // 워커 스레드들 생성
     try {
         CreateWorkerThreads();
         TRACE("CreateWorkerThreads() call completed\n");
@@ -242,13 +257,7 @@ int CThreadSub::Run()
         TRACE("Unknown exception in CreateWorkerThreads()\n");
     }
 
-    // 워커 스레드가 실제로 생성되었는지 확인
-    TRACE("Worker threads created: %d\n", m_workerThreads.size());
-    for (size_t i = 0; i < m_workerThreads.size(); i++) {
-        TRACE("Worker %d pointer: %p\n", i + 1, m_workerThreads[i]);
-    }
-
-    // MQTT 초기화 계속...
+    // MQTT 초기화
     DWORD dwCur = GetTickCount();
     DWORD dwOld = dwCur;
     int nErrorCode = 1;
@@ -260,6 +269,13 @@ int CThreadSub::Run()
     CString mqttIp = configManager.GetMqttIp();
     int mqttPort = configManager.GetMqttPort();
     int mqttKeepAlive = configManager.GetMqttKeepAlive();
+
+    // UI에 초기 연결 시도 알림
+    if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+    {
+        CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+        pDlg->AddActivityLog(_T("MQTT"), mqttIp, ActivityLogItem::LOG_CONNECTION, _T("연결중"));
+    }
 
     CT2A hostA(mqttIp);
     char* mqtt_host = strdup(hostA);
@@ -277,11 +293,18 @@ int CThreadSub::Run()
     if (!mosq) {
         TRACE("mosquitto structure creation failed\n");
         nErrorCode = -1;
+
+        // UI에 오류 알림
+        if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+        {
+            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+            pDlg->AddActivityLog(_T("MQTT"), _T("초기화 실패"), ActivityLogItem::LOG_ERROR, _T("실패"));
+        }
     }
     else {
         TRACE("mosquitto structure creation successful\n");
 
-        // 콜백 함수 등록
+        // 콜백 함수 등록 (obj에 this 포인터 전달)
         mosquitto_connect_callback_set(mosq, connect_callback);
         mosquitto_message_callback_set(mosq, message_callback);
         mosquitto_subscribe_callback_set(mosq, subscribe_callback);
@@ -295,6 +318,14 @@ int CThreadSub::Run()
     if (mosquitto_connect(mosq, mqtt_host, mqtt_port, mqtt_keepalive)) {
         TRACE("MQTT broker connection failed\n");
         nErrorCode = -2;
+
+        // UI에 연결 실패 알림
+        if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+        {
+            CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+            pDlg->OnMqttConnectionChanged(false);
+            pDlg->AddActivityLog(_T("MQTT"), _T("연결 실패"), ActivityLogItem::LOG_ERROR, _T("실패"));
+        }
     }
     else {
         TRACE("MQTT broker connection request sent\n");
@@ -319,8 +350,20 @@ int CThreadSub::Run()
         nNetworkLoop = mosquitto_loop(mosq, 1, 1);
         if (nNetworkLoop != MOSQ_ERR_SUCCESS) {
             TRACE("mosquitto_loop error: %d\n", nNetworkLoop);
+
+            // UI에 연결 끊김 알림
+            if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+            {
+                CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                pDlg->OnMqttConnectionChanged(false);
+            }
+
             Sleep(1000);
-            mosquitto_reconnect(mosq);
+
+            // 재연결 시도
+            if (mosquitto_reconnect(mosq) == MOSQ_ERR_SUCCESS) {
+                TRACE("MQTT reconnection successful\n");
+            }
         }
 
         // 주기적 상태 체크 (5초마다)
@@ -336,6 +379,15 @@ int CThreadSub::Run()
                 // 큐가 너무 커지면 경고
                 if (queueSize > 3000) {
                     TRACE("Warning: Message queue very large! (%d)\n", queueSize);
+
+                    // UI에 경고 알림
+                    if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+                    {
+                        CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+                        CString queueSizeMsg;
+                        queueSizeMsg.Format(_T("큐 크기: %d"), queueSize);
+                        pDlg->AddActivityLog(_T("시스템"), queueSizeMsg, ActivityLogItem::LOG_ERROR, _T("경고"));
+                    }
                 }
             }
 
@@ -350,8 +402,16 @@ int CThreadSub::Run()
         Sleep(1);
     }
 
-    // 정리 작업들은 그대로...
+    // 정리 작업
     TRACE("Main loop terminated\n");
+
+    // UI에 종료 알림
+    if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+    {
+        CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+        pDlg->OnMqttConnectionChanged(false);
+        pDlg->AddActivityLog(_T("MQTT"), _T("통신 종료"), ActivityLogItem::LOG_INFO, _T("완료"));
+    }
 
     if (mosq) {
         mosquitto_disconnect(mosq);

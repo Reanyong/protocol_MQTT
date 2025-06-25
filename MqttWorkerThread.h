@@ -1,12 +1,12 @@
-// MqttWorkerThread.h
+﻿// MqttWorkerThread.h
 #pragma once
 
 #include "MqttMessageQueue.h"
-#include "ParserJSON.h"  // 이게 빠져있었을 수 있음
+#include "ParserJSON.h"
 
 // 전방 선언
 class CEVMQTTDlg;
-struct DebugLogItem;
+struct ActivityLogItem;
 
 class CMqttWorkerThread : public CWinThread
 {
@@ -59,6 +59,9 @@ private:
 	// 내부 처리 메서드
 	void ProcessMessageBatch();
 	bool ProcessSingleMessage(const MqttMessage& msg);
-	void SendDebugLog(const CString& message, const CString& topic, int logType);
 	void PrintWorkerStats();
+
+	// UI 연동 메서드
+	void SendTagUpdateToUI(const CString& tagName, const CString& value, bool success);
+	CString ExtractRepresentativeValue(const std::string& jsonPayload);
 };

@@ -9,18 +9,7 @@ CConfigManager::CConfigManager()
 	, m_mqttKeepAlive(60)         // 기본 keepalive
 {
 	// INI 파일 경로 설정 (실행 파일과 같은 경로에 저장)
-	TCHAR szPath[MAX_PATH] = { 0 };
-	GetModuleFileName(NULL, szPath, MAX_PATH);
-
-	// 실행 파일 이름 부분 제거하고 INI 파일 이름 추가
-	CString strPath(szPath);
-	int nPos = strPath.ReverseFind('\\');
-	if (nPos > 0) {
-		m_iniFilePath = strPath.Left(nPos + 1) + _T("EVMQTT_Config.ini");
-	}
-	else {
-		m_iniFilePath = _T("EVMQTT_Config.ini"); // 현재 디렉토리에 저장
-	}
+	m_iniFilePath = GetIniFilePath();
 }
 
 CConfigManager::~CConfigManager()
@@ -31,6 +20,22 @@ CConfigManager& CConfigManager::GetInstance()
 {
 	static CConfigManager instance;
 	return instance;
+}
+
+CString CConfigManager::GetIniFilePath() const
+{
+	TCHAR szPath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, szPath, MAX_PATH);
+
+	// 실행 파일 이름 부분 제거하고 INI 파일 이름 추가
+	CString strPath(szPath);
+	int nPos = strPath.ReverseFind('\\');
+	if (nPos > 0) {
+		return strPath.Left(nPos + 1) + _T("EVMQTT_Config.ini");
+	}
+	else {
+		return _T("EVMQTT_Config.ini"); // 현재 디렉토리에 저장
+	}
 }
 
 bool CConfigManager::LoadConfig()
@@ -61,9 +66,9 @@ bool CConfigManager::LoadConfig()
 		return result;
 	}
 	catch (const std::exception& e) {
-		OutputDebugStringW(L"설정 로드 오류: ");
+		OutputDebugStringA("설정 로드 오류: ");
 		OutputDebugStringA(e.what());
-		OutputDebugStringW(L"\n");
+		OutputDebugStringA("\n");
 		return false;
 	}
 }
@@ -98,9 +103,9 @@ bool CConfigManager::SaveConfig()
 		return result;
 	}
 	catch (const std::exception& e) {
-		OutputDebugStringW(L"설정 저장 오류: ");
+		OutputDebugStringA("설정 저장 오류: ");
 		OutputDebugStringA(e.what());
-		OutputDebugStringW(L"\n");
+		OutputDebugStringA("\n");
 		return false;
 	}
 }
@@ -172,9 +177,9 @@ bool CConfigManager::LoadTagMappings()
 		return true;
 	}
 	catch (const std::exception& e) {
-		OutputDebugStringW(L"태그 매핑 로드 오류: ");
+		OutputDebugStringA("태그 매핑 로드 오류: ");
 		OutputDebugStringA(e.what());
-		OutputDebugStringW(L"\n");
+		OutputDebugStringA("\n");
 		return false;
 	}
 }
@@ -182,7 +187,6 @@ bool CConfigManager::LoadTagMappings()
 bool CConfigManager::SaveTagMappings()
 {
 	try {
-		// 기존 [TagMapping] 섹션 삭제
 		WritePrivateProfileSection(_T("TagMapping"), NULL, m_iniFilePath);
 
 		// 새로운 태그 매핑들 저장
@@ -193,11 +197,29 @@ bool CConfigManager::SaveTagMappings()
 		return true;
 	}
 	catch (const std::exception& e) {
-		OutputDebugStringW(L"태그 매핑 저장 오류: ");
+		OutputDebugStringA("태그 매핑 저장 오류: ");
 		OutputDebugStringA(e.what());
-		OutputDebugStringW(L"\n");
+		OutputDebugStringA("\n");
 		return false;
 	}
+}
+
+void CConfigManager::AddTagMapping(const CString& tagName, const CString& mapping)
+{
+	m_tagMappings[tagName] = mapping;
+	TRACE("태그 매핑 추가: %s -> %s\n", (LPCTSTR)tagName, (LPCTSTR)mapping);
+
+	// 즉시 INI 파일에 저장
+	WritePrivateProfileString(_T("TagMapping"), tagName, mapping, m_iniFilePath);
+}
+
+void CConfigManager::SetTagMapping(const CString& tagName, const CString& mapping)
+{
+	m_tagMappings[tagName] = mapping;
+	TRACE("태그 매핑 설정: %s -> %s\n", (LPCTSTR)tagName, (LPCTSTR)mapping);
+
+	// 즉시 INI 파일에 저장
+	WritePrivateProfileString(_T("TagMapping"), tagName, mapping, m_iniFilePath);
 }
 
 void CConfigManager::RemoveTagMapping(const CString& tagName)
@@ -205,13 +227,25 @@ void CConfigManager::RemoveTagMapping(const CString& tagName)
 	auto it = m_tagMappings.find(tagName);
 	if (it != m_tagMappings.end()) {
 		m_tagMappings.erase(it);
-		TRACE("태그 매핑 삭제: %s\n", tagName);
+		TRACE("태그 매핑 삭제: %s\n", (LPCTSTR)tagName);
+
+		// 즉시 INI 파일에서 삭제
+		WritePrivateProfileString(_T("TagMapping"), tagName, NULL, m_iniFilePath);
 	}
 }
 
 bool CConfigManager::HasTagMapping(const CString& tagName) const
 {
 	return m_tagMappings.find(tagName) != m_tagMappings.end();
+}
+
+CString CConfigManager::GetTagMapping(const CString& tagName) const
+{
+	auto it = m_tagMappings.find(tagName);
+	if (it != m_tagMappings.end()) {
+		return it->second;
+	}
+	return _T("");
 }
 
 void CConfigManager::SetMqttIp(const CString& ip)
