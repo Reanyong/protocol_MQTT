@@ -39,7 +39,7 @@ public:
 
 	// 버튼 핸들러
 	afx_msg void OnBnClickedBtnAddTag();
-	afx_msg void OnBnClickedBtnEditTag();
+	//afx_msg void OnBnClickedBtnEditTag();
 	afx_msg void OnBnClickedBtnDeleteTag();
 	afx_msg void OnNMDblclkListTagMapping(NMHDR* pNMHDR, LRESULT* pResult);
 
@@ -53,23 +53,3 @@ private:
 	bool ValidateConfig();
 	void ShowTagEditDialog(const CString& tagName = _T(""), const CString& mapping = _T(""));
 };
-
-// 태그 편집 다이얼로그
-class CTagEditDlg : public CDialogEx
-{
-public:
-	CTagEditDlg(CWnd* pParent = nullptr);
-
-	enum { IDD = IDD_ABOUTBOX }; // 임시로 사용, 나중에 별도 다이얼로그 생성
-
-	CString m_strTagName;
-	CString m_strTopic;
-	CString m_strJsonPath;
-
-protected:
-	virtual void DoDataExchange(CDataExchange* pDX);
-	virtual BOOL OnInitDialog();
-	virtual void OnOK();
-
-	DECLARE_MESSAGE_MAP()
-}; 

@@ -10,7 +10,7 @@ IMPLEMENT_DYNAMIC(CConfigDlg, CDialogEx)
 
 CConfigDlg::CConfigDlg(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_CONFIG_DIALOG, pParent)
-	, m_strMqttIP(_T(""))
+	, m_strMqttIP(_T("127.0.0.1"))
 	, m_nMqttPort(1883)
 	, m_nMqttKeepAlive(60)
 	, m_nParsingInterval(50)
@@ -28,14 +28,14 @@ void CConfigDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Text(pDX, IDC_EDIT_MQTT_PORT, m_nMqttPort);
 	DDX_Text(pDX, IDC_EDIT_MQTT_KEEPALIVE, m_nMqttKeepAlive);
 	DDX_Text(pDX, IDC_EDIT_PARSING_INTERVAL, m_nParsingInterval);
-	DDX_Control(pDX, IDC_LIST_TAG_MAPPING, m_listTagMapping);
+	DDX_Control(pDX, IDC_LIST_TAG_CONFIG, m_listTagMapping);
 }
 
 BEGIN_MESSAGE_MAP(CConfigDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_ADD_TAG, &CConfigDlg::OnBnClickedBtnAddTag)
-	ON_BN_CLICKED(IDC_BTN_EDIT_TAG, &CConfigDlg::OnBnClickedBtnEditTag)
+	//ON_BN_CLICKED(IDC_BTN_EDIT_TAG, &CConfigDlg::OnBnClickedBtnEditTag)
 	ON_BN_CLICKED(IDC_BTN_DELETE_TAG, &CConfigDlg::OnBnClickedBtnDeleteTag)
-	ON_NOTIFY(NM_DBLCLK, IDC_LIST_TAG_MAPPING, &CConfigDlg::OnNMDblclkListTagMapping)
+	ON_NOTIFY(NM_DBLCLK, IDC_LIST_TAG_CONFIG, &CConfigDlg::OnNMDblclkListTagMapping)
 END_MESSAGE_MAP()
 
 // CConfigDlg 메시지 처리기
@@ -205,32 +205,32 @@ void CConfigDlg::OnBnClickedBtnAddTag()
 	ShowTagEditDialog();
 }
 
-void CConfigDlg::OnBnClickedBtnEditTag()
-{
-	int selectedItem = m_listTagMapping.GetNextItem(-1, LVNI_SELECTED);
-	if (selectedItem >= 0)
-	{
-		CString tagName = m_listTagMapping.GetItemText(selectedItem, 0);
-		CString topic = m_listTagMapping.GetItemText(selectedItem, 1);
-		CString jsonPath = m_listTagMapping.GetItemText(selectedItem, 2);
-		
-		CString mapping;
-		if (topic != _T("+"))
-		{
-			mapping.Format(_T("%s,%s"), topic, jsonPath);
-		}
-		else
-		{
-			mapping = jsonPath;
-		}
-		
-		ShowTagEditDialog(tagName, mapping);
-	}
-	else
-	{
-		AfxMessageBox(_T("편집할 태그를 선택해주세요."));
-	}
-}
+//void CConfigDlg::OnBnClickedBtnEditTag()
+//{
+//	int selectedItem = m_listTagMapping.GetNextItem(-1, LVNI_SELECTED);
+//	if (selectedItem >= 0)
+//	{
+//		CString tagName = m_listTagMapping.GetItemText(selectedItem, 0);
+//		CString topic = m_listTagMapping.GetItemText(selectedItem, 1);
+//		CString jsonPath = m_listTagMapping.GetItemText(selectedItem, 2);
+//		
+//		CString mapping;
+//		if (topic != _T("+"))
+//		{
+//			mapping.Format(_T("%s,%s"), topic, jsonPath);
+//		}
+//		else
+//		{
+//			mapping = jsonPath;
+//		}
+//		
+//		ShowTagEditDialog(tagName, mapping);
+//	}
+//	else
+//	{
+//		AfxMessageBox(_T("편집할 태그를 선택해주세요."));
+//	}
+//}
 
 void CConfigDlg::OnBnClickedBtnDeleteTag()
 {
@@ -263,7 +263,7 @@ void CConfigDlg::OnNMDblclkListTagMapping(NMHDR* pNMHDR, LRESULT* pResult)
 	
 	if (pNMItemActivate->iItem >= 0)
 	{
-		OnBnClickedBtnEditTag();
+		//OnBnClickedBtnEditTag();
 	}
 	
 	*pResult = 0;

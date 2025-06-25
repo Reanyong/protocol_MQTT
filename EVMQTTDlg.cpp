@@ -572,6 +572,7 @@ void CEVMQTTDlg::OnBnClickedBtnConfig()
 	}
 
 	// 임시로 메시지박스로 설정 화면 구현
+	/*
 	CConfigManager& configManager = CConfigManager::GetInstance();
 	configManager.LoadConfig();
 	
@@ -591,6 +592,12 @@ void CEVMQTTDlg::OnBnClickedBtnConfig()
 		configManager.GetTagGroup());
 	
 	AfxMessageBox(currentConfig, MB_OK | MB_ICONINFORMATION);
-	
+
 	AddDebugLog(_T("설정 버튼이 클릭되었습니다."), _T(""), DebugLogItem::LOG_INFO);
+	*/
+
+	CConfigDlg configDlg(this);
+	if (configDlg.DoModal() == IDOK) {
+		AddDebugLog(_T("설정이 변경되었습니다."), _T(""), DebugLogItem::LOG_INFO);
+	}
 }
