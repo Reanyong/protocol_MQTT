@@ -27,6 +27,11 @@ CMqttWorkerThread::CMqttWorkerThread()
 
 CMqttWorkerThread::~CMqttWorkerThread()
 {
+	TRACE("Worker thread %d destructor called\n", m_workerID);
+
+	// 큐 참조 해제는 ThreadSub에서 처리하므로 여기서는 하지 않음
+	m_pMessageQueue = nullptr; // 포인터만 NULL로 설정
+
 	TRACE("Worker thread %d destroyed\n", m_workerID);
 }
 
@@ -65,12 +70,26 @@ int CMqttWorkerThread::Run()
 			TRACE("Worker %d: Loop iteration %d\n", m_workerID, loopCount);
 		}
 
+		// 큐 상태 확인 - NULL 체크와 shutdown 상태 체크
+		if (!m_pMessageQueue || m_pMessageQueue->IsShutdown()) {
+			TRACE("Worker %d: Queue is null or shutdown, exiting\n", m_workerID);
+			break;
+		}
+
 		MqttMessage msg;
 
 		// Get message from queue (100ms timeout)
 		bool popResult = false;
-		if (m_pMessageQueue) {
+		try {
 			popResult = m_pMessageQueue->Pop(msg, 100);
+		}
+		catch (const std::exception& e) {
+			TRACE("Worker %d: Exception during Pop: %s\n", m_workerID, e.what());
+			break;
+		}
+		catch (...) {
+			TRACE("Worker %d: Unknown exception during Pop\n", m_workerID);
+			break;
 		}
 
 		if (popResult)
@@ -98,8 +117,19 @@ int CMqttWorkerThread::Run()
 		{
 			// 처음 3번은 Pop 실패도 로그
 			if (loopCount <= 3) {
+				// 안전한 큐 크기 확인
+				int queueSize = -1;
+				if (m_pMessageQueue && !m_pMessageQueue->IsShutdown()) {
+					try {
+						queueSize = (int)m_pMessageQueue->Size();
+					}
+					catch (...) {
+						queueSize = -2; // 예외 발생
+					}
+				}
+
 				TRACE("Worker %d: Pop failed/timeout - Queue size: %d\n",
-					m_workerID, m_pMessageQueue ? (int)m_pMessageQueue->Size() : -1);
+					m_workerID, queueSize);
 			}
 
 			// Timeout occurred - process remaining batch
@@ -190,9 +220,9 @@ bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
 
 		if (!parseResult)
 		{
-			// UI에 파싱 실패 알림 (가끔씩만)
+			// 파싱 실패는 주기적으로만 UI에 알림 (스팸 방지)
 			static int parseErrorCount = 0;
-			if (++parseErrorCount % 10 == 0) { // 10번에 1번만
+			if (++parseErrorCount % 20 == 0) { // 20번에 1번만
 				CString errorMsg;
 				errorMsg.Format(_T("오류 %d회"), parseErrorCount);
 				SendTagUpdateToUI(_T("파싱오류"), errorMsg, false);
@@ -206,25 +236,35 @@ bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
 
 		if (tagResult)
 		{
-			// 성공한 경우 실제 태그 정보 추출해서 UI에 알림
-			// JSON에서 대표적인 값 하나 추출해서 표시
-			CString extractedValue = ExtractRepresentativeValue(msg.payload);
-			SendTagUpdateToUI(mqttTopic, extractedValue, true);
+			// 성공한 경우 UI 알림 빈도 제한 (너무 많으면 UI가 느려짐)
+			static int successCount = 0;
+			successCount++;
+
+			// 성공 케이스는 50번에 1번만 UI에 알림
+			if (successCount % 50 == 0) {
+				CString extractedValue = ExtractRepresentativeValue(msg.payload);
+				CString displayValue;
+				displayValue.Format(_T("%s (x%d)"), extractedValue, successCount);
+				SendTagUpdateToUI(mqttTopic, displayValue, true);
+			}
 
 			return true;
 		}
 		else
 		{
-			// 실패 로그는 제한적으로만
+			// 실패 로그는 더 자주 표시 (중요하므로)
 			static int tagErrorCount = 0;
-			if (++tagErrorCount % 20 == 0) { // 20번에 1번만
-				SendTagUpdateToUI(mqttTopic, _T("매핑 실패"), false);
+			if (++tagErrorCount % 10 == 0) { // 10번에 1번
+				CString errorMsg;
+				errorMsg.Format(_T("매핑 실패 (x%d)"), tagErrorCount);
+				SendTagUpdateToUI(mqttTopic, errorMsg, false);
 			}
 			return false;
 		}
 	}
 	catch (const std::exception& e)
 	{
+		// 예외는 항상 UI에 알림 (중요하므로)
 		CString errorMsg;
 		errorMsg.Format(_T("예외: %hs"), e.what());
 		SendTagUpdateToUI(CString(msg.topic.c_str()), errorMsg, false);
@@ -236,8 +276,19 @@ void CMqttWorkerThread::SendTagUpdateToUI(const CString& tagName, const CString&
 {
 	if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
 	{
-		CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-		pDlg->OnTagUpdated(tagName, value, success);
+		// UI 업데이트 빈도 제한 (전역적으로)
+		static DWORD lastUIUpdateTime = 0;
+		DWORD currentTime = GetTickCount();
+
+		// 성공한 경우 더 긴 간격, 실패한 경우 더 짧은 간격
+		DWORD minInterval = success ? 300 : 150; // 성공: 300ms, 실패: 150ms
+
+		if (currentTime - lastUIUpdateTime >= minInterval)
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			pDlg->OnTagUpdated(tagName, value, success);
+			lastUIUpdateTime = currentTime;
+		}
 	}
 }
 
@@ -260,7 +311,8 @@ CString CMqttWorkerThread::ExtractRepresentativeValue(const std::string& jsonPay
 			{
 				auto& fieldValue = jsonData[field];
 				if (fieldValue.is_string()) {
-					return CString(fieldValue.get<std::string>().c_str());
+					CString result = CString(fieldValue.get<std::string>().c_str());
+					return result.Left(15); // 최대 15자까지만 (UI 공간 절약)
 				}
 				else if (fieldValue.is_number()) {
 					CString result;
@@ -268,7 +320,7 @@ CString CMqttWorkerThread::ExtractRepresentativeValue(const std::string& jsonPay
 						result.Format(_T("%d"), fieldValue.get<int>());
 					}
 					else {
-						result.Format(_T("%.2f"), fieldValue.get<double>());
+						result.Format(_T("%.1f"), fieldValue.get<double>()); // 소수점 1자리로 제한
 					}
 					return result;
 				}
@@ -286,7 +338,7 @@ CString CMqttWorkerThread::ExtractRepresentativeValue(const std::string& jsonPay
 
 			if (firstValue.is_string()) {
 				CString result = CString(firstValue.get<std::string>().c_str());
-				return result.Left(20); // 최대 20자까지만
+				return result.Left(15); // 최대 15자까지만
 			}
 			else if (firstValue.is_number()) {
 				CString result;
@@ -294,7 +346,7 @@ CString CMqttWorkerThread::ExtractRepresentativeValue(const std::string& jsonPay
 					result.Format(_T("%d"), firstValue.get<int>());
 				}
 				else {
-					result.Format(_T("%.2f"), firstValue.get<double>());
+					result.Format(_T("%.1f"), firstValue.get<double>());
 				}
 				return result;
 			}

@@ -1,10 +1,10 @@
-﻿// MqttMessageQueue.h
+﻿// MqttMessageQueue.h - 추가 최적화
 #pragma once
 #include <queue>
 #include <mutex>
 #include <condition_variable>
 
-// MQTT Message Structure
+// MQTT Message Structure (기존과 동일)
 struct MqttMessage
 {
     std::string topic;
@@ -40,7 +40,7 @@ struct MqttMessage
     }
 };
 
-// Thread-safe message queue class
+// Thread-safe message queue class with enhanced optimization
 class CMqttMessageQueue
 {
 private:
@@ -65,7 +65,7 @@ public:
         TRACE("MqttMessageQueue destroyed\n");
     }
 
-    // Add message (Producer)
+    // Add message (Producer) - 최적화된 버전
     bool Push(const MqttMessage& msg)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -74,13 +74,13 @@ public:
             return false;
         }
 
-        // Handle full queue
+        // Handle full queue with improved strategy
         if (m_messageQueue.size() >= m_maxQueueSize) {
             TRACE("Warning: Message queue full! Size: %d, Removing old messages\n",
                 m_messageQueue.size());
 
-            // Remove some old messages (10% of queue size)
-            size_t removeCount = m_maxQueueSize / 10;
+            // 더 적극적으로 오래된 메시지 제거 (20% 제거)
+            size_t removeCount = m_maxQueueSize / 5;
             for (size_t i = 0; i < removeCount && !m_messageQueue.empty(); i++) {
                 m_messageQueue.pop();
             }
@@ -88,9 +88,9 @@ public:
 
         m_messageQueue.push(msg);
 
-        // Debug log (limited frequency to avoid spam)
+        // Debug log with reduced frequency
         static int logCounter = 0;
-        if (++logCounter % 100 == 0) {
+        if (++logCounter % 200 == 0) { // 200번에 1번만 로그
             TRACE("Message added to queue - Current size: %d, Topic: %s\n",
                 m_messageQueue.size(), msg.topic.c_str());
         }
@@ -100,7 +100,7 @@ public:
         return true;
     }
 
-    // Get message (Consumer)
+    // Get message (Consumer) - 기존과 동일
     bool Pop(MqttMessage& msg, int timeoutMs = 1000)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -127,6 +127,13 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         m_shutdown = true;
         m_condition.notify_all();
+    }
+
+    // Check if shutdown
+    bool IsShutdown() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_shutdown;
     }
 
     // Current queue size
@@ -158,5 +165,17 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         m_maxQueueSize = maxSize;
         TRACE("Queue max size changed: %d\n", maxSize);
+    }
+
+    // 큐 상태 체크 (워커 스레드에서 안전하게 호출 가능)
+    bool IsHealthy() const
+    {
+        try {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            return !m_shutdown && m_messageQueue.size() < m_maxQueueSize;
+        }
+        catch (...) {
+            return false;
+        }
     }
 };

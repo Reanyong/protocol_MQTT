@@ -58,6 +58,10 @@ CEVMQTTDlg::CEVMQTTDlg(CWnd* pParent /*=nullptr*/)
 	m_nSuccessRate = 0;
 	m_dwLastUpdateTime = GetTickCount();
 	m_nLastProcessedCount = 0;
+
+	// 최적화 변수 초기화
+	m_lastActivityUpdate = 0;
+	m_needActivityRefresh = false;
 }
 
 void CEVMQTTDlg::DoDataExchange(CDataExchange* pDX)
@@ -364,7 +368,7 @@ void CEVMQTTDlg::UpdatePerformance(int messagesPerSec, int successRate)
 	m_nSuccessRate = successRate;
 
 	CString statusText;
-	statusText.Format(_T("처리 속도: %d msg/sec"), messagesPerSec);
+	statusText.Format(_T("처리 속도: %d msg / sec"), messagesPerSec);
 	if (successRate >= 0)
 	{
 		statusText.AppendFormat(_T(" (성공률 %d%%)"), successRate);
@@ -451,10 +455,10 @@ void CEVMQTTDlg::UpdateActivityList()
 
 void CEVMQTTDlg::TrimActivityLogs()
 {
-	while (m_activityLogs.size() > MAX_ACTIVITY_LOGS)
+	/*while (m_activityLogs.size() > MAX_ACTIVITY_LOGS)
 	{
 		m_activityLogs.erase(m_activityLogs.begin());
-	}
+	}*/
 }
 
 COLORREF CEVMQTTDlg::GetStatusColor(bool isGood)
@@ -509,10 +513,19 @@ void CEVMQTTDlg::UpdateParsingStats(int parsedCount, int totalCount)
 
 void CEVMQTTDlg::OnTagUpdated(const CString& tagName, const CString& value, bool success)
 {
+	// 성공한 경우 1/10 확률로만 로그 추가 (스팸 방지)
+	if (success) {
+		static int successCounter = 0;
+		successCounter++;
+		if (successCounter % 10 != 0) {
+			return; // 10번에 1번만 로그
+		}
+	}
+
 	CString status = success ? _T("성공") : _T("실패");
-	TRACE("OnTagUpdated: Tag=%s, Value=%s, Success=%s, Status=%s\n",
-		(LPCTSTR)tagName, (LPCTSTR)value, success ? "true" : "false", (LPCTSTR)status);
-	AddActivityLog(tagName, value, ActivityLogItem::LOG_TAG_UPDATE, status);
+	ActivityLogItem::LogType logType = success ? ActivityLogItem::LOG_TAG_UPDATE : ActivityLogItem::LOG_ERROR;
+
+	AddActivityLog(tagName, value, logType, status);
 }
 
 void CEVMQTTDlg::OnMqttConnectionChanged(bool connected)

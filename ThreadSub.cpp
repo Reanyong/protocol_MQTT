@@ -403,15 +403,7 @@ int CThreadSub::Run()
     }
 
     // 정리 작업
-    TRACE("Main loop terminated\n");
-
-    // UI에 종료 알림
-    if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
-    {
-        CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-        pDlg->OnMqttConnectionChanged(false);
-        pDlg->AddActivityLog(_T("MQTT"), _T("통신 종료"), ActivityLogItem::LOG_INFO, _T("완료"));
-    }
+    TRACE("Main loop terminated, starting cleanup\n");
 
     if (mosq) {
         mosquitto_disconnect(mosq);
@@ -420,9 +412,12 @@ int CThreadSub::Run()
     }
     mosquitto_lib_cleanup();
 
+    // 워커 스레드 종료
     DestroyWorkerThreads();
 
+    // 메시지 큐 삭제
     if (m_pMessageQueue) {
+        TRACE("Final message queue cleanup\n");
         delete m_pMessageQueue;
         m_pMessageQueue = nullptr;
         TRACE("Message queue cleanup completed\n");
@@ -465,6 +460,9 @@ void CThreadSub::CreateWorkerThreads()
                 pWorker->SetWorkerID(i + 1);
                 pWorker->SetBatchSize(30);
                 pWorker->SetBatchTimeout(100);
+
+                // AddRef() 제거 - 일반 포인터이므로 불필요
+                // m_pMessageQueue->AddRef();  // 이 줄 제거
 
                 TRACE("Worker thread %d properties set, resuming thread...\n", i + 1);
 
@@ -579,6 +577,11 @@ void CThreadSub::DestroyWorkerThreads()
         if (waitCount >= MAX_WAIT_COUNT) {
             TRACE("Warning: Worker thread %d termination timeout\n", i + 1);
         }
+
+        // Release() 제거 - 일반 포인터이므로 불필요
+        // if (pWorker->m_pMessageQueue) {
+        //     pWorker->m_pMessageQueue->Release();  // 이 줄 제거
+        // }
 
         // Memory cleanup
         delete pWorker;

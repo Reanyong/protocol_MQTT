@@ -2,9 +2,6 @@
 
 #include "ThreadSub.h"
 
-// 또는 기존 MqttMessageQueue.h 대신 새로운 헤더 사용
-// #include "SimpleMqttQueue.h"  // 새로운 헤더 파일
-
 // 전방 선언
 class CConfigDlg;
 
@@ -28,7 +25,6 @@ struct ActivityLogItem
 	ActivityLogItem() : type(LOG_INFO), fullTime(CTime::GetCurrentTime())
 	{
 		timestamp = fullTime.Format(_T("%H:%M:%S"));
-		// 명시적 초기화 추가
 		tagName = _T("");
 		value = _T("");
 		status = _T("INIT");  // 초기값 설정
@@ -127,7 +123,7 @@ private:
 	int m_nMessagesPerSec;           // 초당 메시지 처리량
 	int m_nSuccessRate;              // 성공률 (%)
 
-	// 활동 로그 관리
+	// 활동 로그 관리 - 최적화된 버전
 	std::vector<ActivityLogItem> m_activityLogs;
 	CCriticalSection m_activityMutex;
 	static const int MAX_ACTIVITY_LOGS = 100;  // 최대 로그 개수
@@ -136,9 +132,16 @@ private:
 	DWORD m_dwLastUpdateTime;        // 마지막 업데이트 시간
 	int m_nLastProcessedCount;       // 마지막 처리된 메시지 수
 
+	// 최적화를 위한 추가 멤버
+	DWORD m_lastActivityUpdate;      // 마지막 활동 로그 업데이트 시간
+	bool m_needActivityRefresh;      // 활동 로그 전체 갱신 필요 여부
+	std::vector<int> m_pendingActivityIndices;  // 대기 중인 활동 로그 인덱스
+
 	// 내부 헬퍼 함수들
 	void UpdateActivityList();
+	void UpdateActivityListOptimized();  // 최적화된 업데이트 메서드
 	void TrimActivityLogs();         // 오래된 로그 제거
+	void AddActivityItemToList(const ActivityLogItem& logItem, int insertIndex);
 	COLORREF GetStatusColor(bool isGood);
 
 public:
