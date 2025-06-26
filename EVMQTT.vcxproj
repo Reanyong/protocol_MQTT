@@ -206,7 +206,6 @@
   <ItemGroup>
     <ClInclude Include="ConfigDlg.h" />
     <ClInclude Include="ConfigManager.h" />
-    <ClInclude Include="ErrorMessages.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="JsonResultManager.h" />
     <ClInclude Include="JsonPathUtil.h" />

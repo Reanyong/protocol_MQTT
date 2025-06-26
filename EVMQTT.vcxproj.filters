@@ -57,9 +57,6 @@
     <ClInclude Include="JsonResultManager.h">
       <Filter>JSON</Filter>
     </ClInclude>
-    <ClInclude Include="ErrorMessages.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
     <ClInclude Include="JsonPathUtil.h">
       <Filter>JSON</Filter>
     </ClInclude>
@@ -68,6 +65,9 @@
     </ClInclude>
     <ClInclude Include="MqttWorkerThread.h">
       <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="ConfigDlg.h">
+      <Filter>Dialog</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -97,6 +97,9 @@
     </ClCompile>
     <ClCompile Include="MqttWorkerThread.cpp">
       <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="ConfigDlg.cpp">
+      <Filter>Dialog</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -220,12 +220,12 @@ bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
 
 		if (!parseResult)
 		{
-			// 파싱 실패는 주기적으로만 UI에 알림 (스팸 방지)
+			// 파싱 실패는 더 적게 UI 알림 (50번에 1번)
 			static int parseErrorCount = 0;
-			if (++parseErrorCount % 20 == 0) { // 20번에 1번만
+			if (++parseErrorCount % 50 == 0) {
 				CString errorMsg;
-				errorMsg.Format(_T("오류 %d회"), parseErrorCount);
-				SendTagUpdateToUI(_T("파싱오류"), errorMsg, false);
+				errorMsg.Format(_T("JSON 파싱오류 (x%d)"), parseErrorCount);
+				SendTagUpdateToUI(_T("JSON파싱"), errorMsg, false);
 			}
 			return false;
 		}
@@ -236,27 +236,25 @@ bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
 
 		if (tagResult)
 		{
-			// 성공한 경우 UI 알림 빈도 제한 (너무 많으면 UI가 느려짐)
+			// 성공한 경우 UI 알림은 SendTagUpdateToUI 내부에서 제한됨
 			static int successCount = 0;
 			successCount++;
 
-			// 성공 케이스는 50번에 1번만 UI에 알림
-			if (successCount % 50 == 0) {
+			// 매우 제한적으로만 UI 업데이트
+			if (successCount % 200 == 0) { // 200번에 1번만
 				CString extractedValue = ExtractRepresentativeValue(msg.payload);
-				CString displayValue;
-				displayValue.Format(_T("%s (x%d)"), extractedValue, successCount);
-				SendTagUpdateToUI(mqttTopic, displayValue, true);
+				SendTagUpdateToUI(mqttTopic, extractedValue, true);
 			}
 
 			return true;
 		}
 		else
 		{
-			// 실패 로그는 더 자주 표시 (중요하므로)
+			// 실패한 경우도 빈도 제한
 			static int tagErrorCount = 0;
-			if (++tagErrorCount % 10 == 0) { // 10번에 1번
+			if (++tagErrorCount % 25 == 0) { // 25번에 1번
 				CString errorMsg;
-				errorMsg.Format(_T("매핑 실패 (x%d)"), tagErrorCount);
+				errorMsg.Format(_T("태그매핑 실패 (x%d)"), tagErrorCount);
 				SendTagUpdateToUI(mqttTopic, errorMsg, false);
 			}
 			return false;
@@ -276,18 +274,51 @@ void CMqttWorkerThread::SendTagUpdateToUI(const CString& tagName, const CString&
 {
 	if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
 	{
-		// UI 업데이트 빈도 제한 (전역적으로)
+		// *** 훨씬 더 엄격한 UI 업데이트 빈도 제한 ***
 		static DWORD lastUIUpdateTime = 0;
+		static int successCounter = 0;
+		static int errorCounter = 0;
+
 		DWORD currentTime = GetTickCount();
 
-		// 성공한 경우 더 긴 간격, 실패한 경우 더 짧은 간격
-		DWORD minInterval = success ? 300 : 150; // 성공: 300ms, 실패: 150ms
-
-		if (currentTime - lastUIUpdateTime >= minInterval)
+		if (success)
 		{
-			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-			pDlg->OnTagUpdated(tagName, value, success);
-			lastUIUpdateTime = currentTime;
+			successCounter++;
+
+			// 성공한 경우: 100번에 1번만 UI 업데이트 (또는 5초마다)
+			bool shouldUpdateSuccess = (successCounter % 100 == 0) ||
+				(currentTime - lastUIUpdateTime > 5000);
+
+			if (shouldUpdateSuccess)
+			{
+				CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+
+				// 성공 케이스는 통계 정보로 표시
+				CString displayValue;
+				displayValue.Format(_T("처리완료 (총 %d건)"), successCounter);
+				pDlg->OnTagUpdated(_T("MQTT처리"), displayValue, true);
+
+				lastUIUpdateTime = currentTime;
+			}
+		}
+		else
+		{
+			errorCounter++;
+
+			// 실패한 경우: 10번에 1번만 UI 업데이트 (또는 2초마다)
+			bool shouldUpdateError = (errorCounter % 10 == 0) ||
+				(currentTime - lastUIUpdateTime > 2000);
+
+			if (shouldUpdateError)
+			{
+				CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+
+				CString displayValue;
+				displayValue.Format(_T("오류 (총 %d건) - %s"), errorCounter, value);
+				pDlg->OnTagUpdated(tagName, displayValue, false);
+
+				lastUIUpdateTime = currentTime;
+			}
 		}
 	}
 }
@@ -376,4 +407,22 @@ void CMqttWorkerThread::PrintWorkerStats()
 	TRACE("Processing speed: %.1f msg/sec\n", msgPerSec);
 	TRACE("Runtime: %.1f seconds\n", elapsedSec);
 	TRACE("=============================\n");
+
+	// *** 통계 정보를 UI에 주기적으로 전송 (10초마다) ***
+	static DWORD lastStatsToUI = 0;
+	DWORD currentTime = GetTickCount();
+
+	if (currentTime - lastStatsToUI > 10000) // 10초마다
+	{
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+
+			CString statsMsg;
+			statsMsg.Format(_T("워커%d: %.1f msg/s"), m_workerID, msgPerSec);
+			pDlg->OnTagUpdated(_T("성능통계"), statsMsg, true);
+		}
+
+		lastStatsToUI = currentTime;
+	}
 }
