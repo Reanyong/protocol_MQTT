@@ -23,6 +23,7 @@
 #define IDC_EDIT_PARSING_INTERVAL       112
 #define IDC_STC_EV_STATUS               112
 #define IDC_LIST_TAG_CONFIG             113
+#define IDC_BTN_VIEW_LOG                113
 #define IDC_BTN_ADD_TAG                 114
 #define IDC_BTN_EDIT_TAG                115
 #define IDC_BTN_DELETE_TAG              116

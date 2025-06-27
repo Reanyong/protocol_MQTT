@@ -2,6 +2,7 @@
 #include "ParserJSON.h"
 #include "ConfigManager.h"
 #include "JsonPathUtil.h"
+#include "LogManager.h"
 #include <sstream>
 #include <string>
 
@@ -30,6 +31,21 @@ bool CJsonParser::ParseMessage(const char* payload, int length)
 		m_errorMessage.Format(_T("JSON 파싱 오류: %hs"), e.what());
 		m_isValid = false;
 		TRACE("JSON 파싱 오류: %s\n", e.what());
+
+		// 실패 로그 기록 - 이 부분 추가
+		CLogManager& logManager = CLogManager::GetInstance();
+		CString payloadPreview;
+		if (length > 0 && payload) {
+			// 처음 100자만 미리보기로 저장
+			int previewLen = min(100, length);
+			std::string preview(payload, previewLen);
+			payloadPreview = CString(preview.c_str());
+			if (length > 100) {
+				payloadPreview += _T("...");
+			}
+		}
+		logManager.WriteErrorLog(_T("JSON파싱오류"), _T("메시지처리"), m_errorMessage, payloadPreview);
+
 		return false;
 	}
 	catch (const std::exception& e) {
@@ -37,6 +53,11 @@ bool CJsonParser::ParseMessage(const char* payload, int length)
 		m_errorMessage.Format(_T("예외 발생: %hs"), e.what());
 		m_isValid = false;
 		TRACE("예외 발생: %s\n", e.what());
+
+		// 실패 로그 기록 - 이 부분 추가
+		CLogManager& logManager = CLogManager::GetInstance();
+		logManager.WriteErrorLog(_T("JSON예외"), _T("메시지처리"), m_errorMessage);
+
 		return false;
 	}
 }

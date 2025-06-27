@@ -209,6 +209,7 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="JsonResultManager.h" />
     <ClInclude Include="JsonPathUtil.h" />
+    <ClInclude Include="LogManager.h" />
     <ClInclude Include="MqttMessageQueue.h" />
     <ClInclude Include="MqttWorkerThread.h" />
     <ClInclude Include="ParserJSON.h" />
@@ -221,6 +222,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ConfigDlg.cpp" />
+    <ClCompile Include="LogManager.cpp" />
     <ClCompile Include="MqttWorkerThread.cpp" />
     <ClCompile Include="ConfigManager.cpp" />
     <ClCompile Include="JsonResultManager.cpp" />

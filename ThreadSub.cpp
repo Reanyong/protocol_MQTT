@@ -8,6 +8,7 @@
 #include "ConfigManager.h"
 #include "JsonResultManager.h"
 #include "MqttWorkerThread.h"
+#include "LogManager.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -128,13 +129,42 @@ void connect_callback(struct mosquitto* mosq, void* obj, int result)
             pDlg->OnMqttConnectionChanged(false);
         }
 
-        switch (result) {
-        case 1: TRACE("Connection refused: bad protocol version\n"); break;
-        case 2: TRACE("Connection refused: client ID rejected\n"); break;
-        case 3: TRACE("Connection refused: server unavailable\n"); break;
-        case 4: TRACE("Connection refused: bad username/password\n"); break;
-        case 5: TRACE("Connection refused: not authorized\n"); break;
-        default: TRACE("Connection refused: unknown error\n"); break;
+        else {
+            TRACE("=== MQTT Connection Failed! Error code: %d ===\n", result);
+
+            // 실패 로그 기록
+            CLogManager& logManager = CLogManager::GetInstance();
+            CString errorMsg;
+            CString detailMsg;
+
+            switch (result) {
+            case 1:
+                errorMsg = _T("프로토콜 버전 오류");
+                detailMsg = _T("Connection refused: bad protocol version");
+                break;
+            case 2:
+                errorMsg = _T("클라이언트 ID 거부");
+                detailMsg = _T("Connection refused: client ID rejected");
+                break;
+            case 3:
+                errorMsg = _T("서버 사용 불가");
+                detailMsg = _T("Connection refused: server unavailable");
+                break;
+            case 4:
+                errorMsg = _T("인증 실패");
+                detailMsg = _T("Connection refused: bad username/password");
+                break;
+            case 5:
+                errorMsg = _T("권한 없음");
+                detailMsg = _T("Connection refused: not authorized");
+                break;
+            default:
+                errorMsg = _T("알 수 없는 오류");
+                detailMsg.Format(_T("Connection refused: unknown error (code: %d)"), result);
+                break;
+            }
+
+            logManager.WriteErrorLog(_T("MQTT연결실패"), _T("브로커연결"), errorMsg, detailMsg);
         }
     }
 }

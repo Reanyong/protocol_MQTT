@@ -5,6 +5,7 @@
 #include "ConfigDlg.h"
 #include "afxdialogex.h"
 #include "ConfigManager.h"
+#include "LogManager.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -84,6 +85,7 @@ BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
 	ON_MESSAGE(WM_USER + 100, OnUpdateStats)
 	ON_MESSAGE(WM_USER + 102, OnUpdateActivityLog)
 	ON_BN_CLICKED(IDC_BTN_CONFIG, &CEVMQTTDlg::OnBnClickedBtnConfig)
+	ON_BN_CLICKED(IDC_BTN_VIEW_LOG, &CEVMQTTDlg::OnBnClickedBtnViewLog)
 END_MESSAGE_MAP()
 
 // CEVMQTTDlg 메시지 처리기
@@ -572,5 +574,76 @@ void CEVMQTTDlg::OnBnClickedBtnConfig()
 		UpdateTagInfo(0, configManager.GetAllTagMappings().size());
 
 		AddActivityLog(_T("시스템"), _T("설정 변경"), ActivityLogItem::LOG_INFO, _T("완료"));
+	}
+}
+
+
+void CEVMQTTDlg::OnBnClickedBtnViewLog()
+{
+	// 로그 매니저에서 로그 파일 경로 가져오기
+	CLogManager& logManager = CLogManager::GetInstance();
+	CString logFilePath = logManager.GetLogFilePath();
+
+	// 로그 파일이 존재하는지 확인
+	if (!logManager.LogFileExists())
+	{
+		AfxMessageBox(_T("아직 생성된 오류 로그가 없습니다.\n로그는 오류 발생 시 자동으로 생성됩니다."),
+			MB_OK | MB_ICONINFORMATION);
+		return;
+	}
+
+	// 파일 크기 확인
+	int fileSize = logManager.GetLogFileSize();
+	if (fileSize > 5120) // 5MB 이상
+	{
+		CString sizeMsg;
+		sizeMsg.Format(_T("로그 파일 크기가 %dKB입니다.\n큰 파일을 열면 시간이 걸릴 수 있습니다.\n계속하시겠습니까?"),
+			fileSize);
+
+		if (AfxMessageBox(sizeMsg, MB_YESNO | MB_ICONQUESTION) != IDYES)
+		{
+			return;
+		}
+	}
+
+	// ShellExecute로 기본 텍스트 에디터에서 로그 파일 열기
+	HINSTANCE result = ShellExecute(
+		this->GetSafeHwnd(),
+		_T("open"),
+		logFilePath,
+		NULL,
+		NULL,
+		SW_SHOWNORMAL
+	);
+
+	// 실행 결과 확인
+	if ((INT_PTR)result <= 32)
+	{
+		// 실패한 경우 메모장으로 직접 열기 시도
+		CString notepadCmd;
+		notepadCmd.Format(_T("notepad.exe \"%s\""), logFilePath);
+
+		HINSTANCE notepadResult = ShellExecute(
+			this->GetSafeHwnd(),
+			_T("open"),
+			_T("notepad.exe"),
+			logFilePath,
+			NULL,
+			SW_SHOWNORMAL
+		);
+
+		if ((INT_PTR)notepadResult <= 32)
+		{
+			// 메모장도 실패한 경우
+			CString errorMsg;
+			errorMsg.Format(_T("로그 파일을 열 수 없습니다.\n수동으로 다음 경로의 파일을 확인하세요:\n\n%s"),
+				logFilePath);
+			AfxMessageBox(errorMsg, MB_OK | MB_ICONERROR);
+		}
+	}
+	else
+	{
+		// 성공적으로 열린 경우 활동 로그에 기록
+		AddActivityLog(_T("시스템"), _T("로그 파일 열기"), ActivityLogItem::LOG_INFO, _T("완료"));
 	}
 }

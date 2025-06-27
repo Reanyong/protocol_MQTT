@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "MqttWorkerThread.h"
 #include "EVMQTTDlg.h"
+#include "LogManager.h"
 
 IMPLEMENT_DYNCREATE(CMqttWorkerThread, CWinThread)
 
@@ -220,12 +221,27 @@ bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
 
 		if (!parseResult)
 		{
-			// 파싱 실패는 더 적게 UI 알림 (50번에 1번)
+			// 파싱 실패는 주기적으로만 UI에 알림 (스팸 방지)
 			static int parseErrorCount = 0;
-			if (++parseErrorCount % 50 == 0) {
+			if (++parseErrorCount % 50 == 0) { // 50번에 1번만
 				CString errorMsg;
-				errorMsg.Format(_T("JSON 파싱오류 (x%d)"), parseErrorCount);
-				SendTagUpdateToUI(_T("JSON파싱"), errorMsg, false);
+				errorMsg.Format(_T("오류 %d회"), parseErrorCount);
+				SendTagUpdateToUI(_T("파싱오류"), errorMsg, false);
+
+				// 실패 로그 기록
+				CLogManager& logManager = CLogManager::GetInstance();
+				CString payloadPreview;
+				if (msg.payloadLength > 0) {
+					int previewLen = min(150, msg.payloadLength);
+					payloadPreview = CString(msg.payload.substr(0, previewLen).c_str());
+					if (msg.payloadLength > 150) {
+						payloadPreview += _T("...");
+					}
+				}
+				logManager.WriteErrorLog(_T("메시지파싱실패"),
+					CString(msg.topic.c_str()),
+					CString(_T("JSON 파싱 실패 (누적: ")) + errorMsg + _T(")"),
+					payloadPreview);
 			}
 			return false;
 		}

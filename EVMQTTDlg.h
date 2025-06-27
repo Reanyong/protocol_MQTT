@@ -149,4 +149,5 @@ public:
 	void UpdateParsingStats(int parsedCount, int totalCount);
 	void OnTagUpdated(const CString& tagName, const CString& value, bool success);
 	void OnMqttConnectionChanged(bool connected);
+	afx_msg void OnBnClickedBtnViewLog();
 };

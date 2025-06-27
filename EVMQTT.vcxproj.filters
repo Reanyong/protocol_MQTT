@@ -60,14 +60,17 @@
     <ClInclude Include="JsonPathUtil.h">
       <Filter>JSON</Filter>
     </ClInclude>
-    <ClInclude Include="MqttMessageQueue.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
-    <ClInclude Include="MqttWorkerThread.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
     <ClInclude Include="ConfigDlg.h">
       <Filter>Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="MqttMessageQueue.h">
+      <Filter>Thread</Filter>
+    </ClInclude>
+    <ClInclude Include="MqttWorkerThread.h">
+      <Filter>Thread</Filter>
+    </ClInclude>
+    <ClInclude Include="LogManager.h">
+      <Filter>헤더 파일</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -95,11 +98,14 @@
     <ClCompile Include="JsonPathUtil.cpp">
       <Filter>JSON</Filter>
     </ClCompile>
-    <ClCompile Include="MqttWorkerThread.cpp">
-      <Filter>소스 파일</Filter>
-    </ClCompile>
     <ClCompile Include="ConfigDlg.cpp">
       <Filter>Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="MqttWorkerThread.cpp">
+      <Filter>Thread</Filter>
+    </ClCompile>
+    <ClCompile Include="LogManager.cpp">
+      <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
