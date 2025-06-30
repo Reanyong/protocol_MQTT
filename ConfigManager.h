@@ -52,6 +52,10 @@ public:
 	void SetMqttKeepAlive(int keepAlive);
 	int GetMqttKeepAlive() const;
 
+	// Device 설정 메서드
+	void SetDevice(const CString& deviceType);
+	CString GetDevice() const;
+
 private:
 	int m_parsingInterval;
 	CString m_iniFilePath;
@@ -60,6 +64,9 @@ private:
 	int m_mqttPort;
 	int m_mqttKeepAlive;
 	std::map<CString, CString> m_tagMappings;  // 태그명 -> JSONPath 매핑
+
+	// Device 타입
+	CString m_device;
 
 	// 내부 헬퍼 메서드
 	CString GetIniFilePath() const;

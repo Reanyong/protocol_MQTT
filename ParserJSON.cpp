@@ -69,11 +69,13 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 		return false;
 	}
 
-	TRACE("=== MQTT 토픽별 태그 매핑 적용 시작 ===\n");
-	TRACE("받은 MQTT 토픽: %S\n", (LPCTSTR)mqttTopic);
-
 	CConfigManager& configManager = CConfigManager::GetInstance();
 	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
+	CString deviceType = configManager.GetDevice();
+
+	TRACE("=== MQTT 토픽별 태그 매핑 적용 시작 ===\n");
+	TRACE("받은 MQTT 토픽: %S\n", (LPCTSTR)mqttTopic);
+	TRACE("Device Type: %s\n", (LPCTSTR)deviceType);
 
 	if (tagMappings.empty()) {
 		TRACE("태그 매핑이 비어있습니다.\n");
@@ -180,18 +182,60 @@ bool CJsonParser::ApplyValueToTagOptimized(const CString& tagName, const CString
 
 		TRACE("JSONPath로 값 추출 성공\n");
 
+		// SMC_PF3A703H Device일 때 32bit에서 상위 16bit 추출
+		CConfigManager& configManager = CConfigManager::GetInstance();
+		CString deviceType = configManager.GetDevice();
+
+		nlohmann::json processedValue = *pValue;  // 기본값은 원본 그대로
+
+		if (deviceType.CompareNoCase(_T("SMC_PF3A703H")) == 0) {
+			uint32_t processData = 0;
+			bool validData = false;
+
+			// 숫자 타입인 경우
+			if (pValue->is_number()) {
+				processData = static_cast<uint32_t>(pValue->get<double>());
+				validData = true;
+				TRACE("SMC 숫자 데이터: %.0f (0x%08X)\n", pValue->get<double>(), processData);
+			}
+			// 문자열 타입인 경우 (16진수 처리)
+			else if (pValue->is_string()) {
+				std::string hexStr = pValue->get<std::string>();
+				TRACE("SMC 문자열 데이터: %s\n", hexStr.c_str());
+
+				// 16진수 문자열 변환 (8자리 또는 0x 접두사 처리)
+				if ((hexStr.length() == 8 && hexStr.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos) ||
+					(hexStr.length() == 10 && hexStr.substr(0, 2) == "0x")) {
+
+					const char* hexStart = (hexStr.substr(0, 2) == "0x") ? hexStr.c_str() + 2 : hexStr.c_str();
+					processData = static_cast<uint32_t>(strtoul(hexStart, nullptr, 16));
+					validData = true;
+					TRACE("16진수 문자열 변환: %s → 0x%08X (%u)\n", hexStr.c_str(), processData, processData);
+				}
+			}
+
+			if (validData) {
+				// SMC 스펙: Bit 16-31이 Flow measurement value (상위 16비트)
+				int16_t flowPD = static_cast<int16_t>((processData >> 16) & 0xFFFF);
+				processedValue = flowPD;
+
+				TRACE("SMC 32bit → 16bit 처리: 전체=0x%08X(%u) → 상위16bit(FlowPD)=%d\n",
+					processData, processData, flowPD);
+			}
+		}
+
 		// 추출된 값의 타입과 내용 출력
-		if (pValue->is_string()) {
-			TRACE("추출된 값 (문자열): %s\n", pValue->get<std::string>().c_str());
+		if (processedValue.is_string()) {
+			TRACE("처리된 값 (문자열): %s\n", processedValue.get<std::string>().c_str());
 		}
-		else if (pValue->is_number()) {
-			TRACE("추출된 값 (숫자): %f\n", pValue->get<double>());
+		else if (processedValue.is_number()) {
+			TRACE("처리된 값 (숫자): %f\n", processedValue.get<double>());
 		}
-		else if (pValue->is_boolean()) {
-			TRACE("추출된 값 (불린): %s\n", pValue->get<bool>() ? "true" : "false");
+		else if (processedValue.is_boolean()) {
+			TRACE("처리된 값 (불린): %s\n", processedValue.get<bool>() ? "true" : "false");
 		}
 		else {
-			TRACE("추출된 값 (기타): %s\n", pValue->dump().c_str());
+			TRACE("처리된 값 (기타): %s\n", processedValue.dump().c_str());
 		}
 
 		// EasyView 태그 정보 조회
@@ -205,18 +249,18 @@ bool CJsonParser::ApplyValueToTagOptimized(const CString& tagName, const CString
 		TRACE("태그 정보 - 타입: %d, Station: %d, Position: %d\n",
 			tagInfo.nTagType, tagInfo.nStnPos, tagInfo.nTagPos);
 
-		// JSON 값 타입에 따른 최적화된 처리
+		// JSON 값 타입에 따른 최적화된 처리 (processedValue 사용)
 		switch (tagInfo.nTagType) {
 		case TYPE_DI:
 		case TYPE_DO:
-			return ApplyDigitalValue(tagInfo, *pValue);
+			return ApplyDigitalValue(tagInfo, processedValue);
 
 		case TYPE_AI:
 		case TYPE_AO:
-			return ApplyAnalogValue(tagInfo, *pValue);
+			return ApplyAnalogValue(tagInfo, processedValue);
 
 		case TYPE_SI:
-			return ApplyStringValue(tagInfo, *pValue);
+			return ApplyStringValue(tagInfo, processedValue);
 
 		default:
 			TRACE("지원하지 않는 태그 타입: %d\n", tagInfo.nTagType);
@@ -316,6 +360,18 @@ bool CJsonParser::ApplyAnalogValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann
 	else {
 		TRACE("아날로그 태그에 적용할 수 없는 JSON 값 타입\n");
 		return false;
+	}
+
+	// SMC_PF3A703H Device일 때 IODD 변환 공식 적용 (이미 16bit 값이 들어옴)
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	CString deviceType = configManager.GetDevice();
+
+	if (deviceType.CompareNoCase(_T("SMC_PF3A703H")) == 0) {
+		// IODD 스펙: FlowValue(L/min) = 0.75 × PD + 0
+		double originalPD = analogValue;
+		analogValue = 0.75 * analogValue + 0.0;
+		TRACE("SMC PF3A703H 변환 공식 적용: PD=%.0f → FlowValue=%.2f L/min\n",
+			originalPD, analogValue);
 	}
 
 	int result = EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, analogValue);

@@ -7,6 +7,7 @@ CConfigManager::CConfigManager()
 	, m_mqttIp(_T("127.0.0.1"))   // 기본 IP
 	, m_mqttPort(1883)            // 기본 포트
 	, m_mqttKeepAlive(60)         // 기본 keepalive
+	, m_device(_T(""))
 {
 	// INI 파일 경로 설정 (실행 파일과 같은 경로에 저장)
 	m_iniFilePath = GetIniFilePath();
@@ -43,7 +44,7 @@ bool CConfigManager::LoadConfig()
 	bool result = true;
 
 	try {
-		// 파싱 간격 읽기
+		// 파싱 간격
 		m_parsingInterval = GetPrivateProfileInt(_T("General"), _T("ParsingInterval"),
 			1000, m_iniFilePath);
 
@@ -52,11 +53,17 @@ bool CConfigManager::LoadConfig()
 			szTagGroup, 64, m_iniFilePath);
 		m_tagGroup = szTagGroup;
 
-		// MQTT 설정 읽기
+		// MQTT 설정
 		TCHAR szMqttIp[64] = { 0 };
 		GetPrivateProfileString(_T("General"), _T("Ip"), _T("127.0.0.1"),
 			szMqttIp, 64, m_iniFilePath);
 		m_mqttIp = szMqttIp;
+
+		// Device 설정
+		TCHAR szDevice[64] = { 0 };
+		GetPrivateProfileString(_T("General"), _T("Device"), _T(""),
+			szDevice, 64, m_iniFilePath);
+		m_device = szDevice;
 
 		m_mqttPort = GetPrivateProfileInt(_T("General"), _T("Port"), 1883, m_iniFilePath);
 		m_mqttKeepAlive = GetPrivateProfileInt(_T("General"), _T("KeepAlive"), 60, m_iniFilePath);
@@ -95,8 +102,9 @@ bool CConfigManager::SaveConfig()
 		strKeepAlive.Format(_T("%d"), m_mqttKeepAlive);
 		WritePrivateProfileString(_T("General"), _T("KeepAlive"), strKeepAlive, m_iniFilePath);
 
-		WritePrivateProfileString(_T("TagInfo"), _T("TagGroup"),
-			m_tagGroup, m_iniFilePath);
+		WritePrivateProfileString(_T("TagInfo"), _T("TagGroup"), m_tagGroup, m_iniFilePath);
+
+		WritePrivateProfileString(_T("General"), _T("Device"), m_device, m_iniFilePath);
 
 		result = result && SaveTagMappings();
 
@@ -276,4 +284,16 @@ void CConfigManager::SetMqttKeepAlive(int keepAlive)
 int CConfigManager::GetMqttKeepAlive() const
 {
 	return m_mqttKeepAlive;
+}
+
+// Device 관련 메서드
+void CConfigManager::SetDevice(const CString& deviceType)
+{
+	m_device = deviceType;
+	TRACE("Device 설정: %s\n", (LPCTSTR)deviceType);
+}
+
+CString CConfigManager::GetDevice() const
+{
+	return m_device;
 }
