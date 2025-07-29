@@ -33,7 +33,6 @@
 #define IDC_STC_KEEPALIVE               121
 #define IDC_STC_INTERVAL                122
 #define IDC_STC_TAG_COUNT               123
-#define IDI_ICON1                       134
 #define IDR_MAINFRAME                   134
 #define IDC_STC_MS                      1021
 
