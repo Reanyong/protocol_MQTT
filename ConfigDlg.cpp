@@ -46,6 +46,7 @@ void CConfigDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Text(pDX, IDC_EDIT_MQTT_KEEPALIVE, m_nMqttKeepAlive);
 	DDX_Text(pDX, IDC_EDIT_PARSING_INTERVAL, m_nParsingInterval);
 	DDX_Control(pDX, IDC_LIST_TAG_CONFIG, m_listTagMapping);
+	DDX_Control(pDX, IDC_STC_TAG_COUNT, m_staticTagCount);
 }
 
 BEGIN_MESSAGE_MAP(CConfigDlg, CDialogEx)
@@ -73,6 +74,9 @@ BOOL CConfigDlg::OnInitDialog()
 
 	// 태그 매핑 데이터 표시
 	UpdateTagMappingList();
+
+	// INI의 태그 개수 표시
+	DisplayTagCount();
 
 	return TRUE;
 }
@@ -790,4 +794,19 @@ BOOL CConfigDlg::CInlineEdit::PreTranslateMessage(MSG* pMsg)
 	}
 
 	return CEdit::PreTranslateMessage(pMsg);
+}
+
+void CConfigDlg::DisplayTagCount()
+{
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
+	
+	int tagCount = static_cast<int>(tagMappings.size());
+	
+	CString countText;
+	countText.Format(_T("총 등록된 태그: %d개"), tagCount);
+	
+	m_staticTagCount.SetWindowText(countText);
+	
+	TRACE("태그 개수 표시: %d개\n", tagCount);
 }

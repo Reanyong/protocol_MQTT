@@ -33,6 +33,15 @@ public:
 	void AddTagMapping(const CString& tagName, const CString& mapping);
 	void SetTagMapping(const CString& tagName, const CString& mapping);
 
+	//INI 섹션 읽기 메서드
+	bool ReadIniSectionSmart(const CString& sectionName, std::vector<CString>& lines);
+
+	// 태그 매핑 라인 파싱
+	bool ParseTagMappingLine(const CString& line, CString& tagName, CString& mapping);
+
+	// 버퍼 크기 자동 조정
+	DWORD GetOptimalBufferSize(const CString& sectionName);
+
 	// 태그 매핑 삭제
 	void RemoveTagMapping(const CString& tagName);
 

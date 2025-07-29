@@ -58,7 +58,9 @@ private:
 	bool ValidateConfig();
 	void ShowTagEditDialog(const CString& tagName = _T(""), const CString& mapping = _T(""));
 
-	// 새로운 기능들
+	CStatic m_staticTagCount;
+	void DisplayTagCount();
+
 	void AddNewTagRow();
 	void DeleteSelectedTag();
 	void DeleteTagAtIndex(int index);
