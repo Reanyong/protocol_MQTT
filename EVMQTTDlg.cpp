@@ -382,6 +382,23 @@ void CEVMQTTDlg::UpdatePerformance(int messagesPerSec, int successRate)
 void CEVMQTTDlg::AddActivityLog(const CString& tagName, const CString& value,
 	ActivityLogItem::LogType type, const CString& status)
 {
+	TRACE("=== AddActivityLog 파라미터 디버깅 ===\n");
+	TRACE("tagName 주소: %p, 내용: [%s]\n", &tagName, (LPCTSTR)tagName);
+	TRACE("value 주소: %p, 내용: [%s]\n", &value, (LPCTSTR)value);
+	TRACE("status 주소: %p, 내용: [%s]\n", &status, (LPCTSTR)status);
+
+	// 🔍 status 문자열의 각 바이트 확인
+	TRACE("status 길이: %d\n", status.GetLength());
+	for (int i = 0; i < min(status.GetLength(), 10); i++) {
+		TCHAR ch = status.GetAt(i);
+		TRACE("  status[%d]: '%c' (0x%02X)\n", i,
+			(ch >= 32 && ch <= 126) ? ch : '?', (unsigned int)ch);
+	}
+
+	// 🔍 임시 객체 생성해서 비교
+	CString tempStatus = status;  // 복사 생성
+	TRACE("tempStatus 주소: %p, 내용: [%s]\n", &tempStatus, (LPCTSTR)tempStatus);
+
 	CSingleLock lock(&m_activityMutex, TRUE);
 	if (!lock.IsLocked()) return;
 

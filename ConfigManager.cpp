@@ -260,7 +260,6 @@ bool CConfigManager::ReadIniSectionSmart(const CString& sectionName, std::vector
 {
 	lines.clear();
 
-	// 1단계: 최적 버퍼 크기 추정
 	DWORD initialSize = GetOptimalBufferSize(sectionName);
 	TRACE("초기 버퍼 크기: %d KB\n", initialSize / 1024);
 
@@ -287,7 +286,6 @@ bool CConfigManager::ReadIniSectionSmart(const CString& sectionName, std::vector
 			m_iniFilePath
 		);
 
-		// 성공 조건: 읽은 데이터가 버퍼 크기보다 충분히 작음
 		if (actualRead < currentSize - 2) {
 			success = true;
 			TRACE("성공! 실제 읽은 크기: %d bytes\n", actualRead);
@@ -310,7 +308,6 @@ bool CConfigManager::ReadIniSectionSmart(const CString& sectionName, std::vector
 		return false;
 	}
 
-	// 3단계: 읽은 데이터를 라인별로 분리
 	if (actualRead > 0) {
 		TCHAR* p = buffer.data();
 		int lineCount = 0;
@@ -330,7 +327,7 @@ bool CConfigManager::ReadIniSectionSmart(const CString& sectionName, std::vector
 	return true;
 }
 
-// 📝 태그 매핑 라인 파싱 (새로 추가)
+// 태그 매핑 라인 파싱
 bool CConfigManager::ParseTagMappingLine(const CString& line, CString& tagName, CString& mapping)
 {
 	// 빈 라인이나 주석 라인 건너뛰기
@@ -365,14 +362,12 @@ bool CConfigManager::ParseTagMappingLine(const CString& line, CString& tagName, 
 		return false;
 	}
 
-	// 태그명 길이 제한 (50자)
 	if (tagName.GetLength() > 50) {
 		TRACE("태그명이 너무 긴 라인 건너뜀 (%d자): %s\n",
 			tagName.GetLength(), (LPCTSTR)tagName);
 		return false;
 	}
 
-	// 매핑값 길이 제한 (500자)
 	if (mapping.GetLength() > 500) {
 		TRACE("매핑값이 너무 긴 라인 건너뜀 (%d자): %s\n",
 			mapping.GetLength(), (LPCTSTR)tagName);
@@ -382,7 +377,7 @@ bool CConfigManager::ParseTagMappingLine(const CString& line, CString& tagName, 
 	return true;
 }
 
-// 최적 버퍼 크기 계산 (새로 추가)
+// 최적 버퍼 크기 계산
 DWORD CConfigManager::GetOptimalBufferSize(const CString& sectionName)
 {
 	HANDLE hFile = CreateFile(m_iniFilePath, GENERIC_READ, FILE_SHARE_READ,
@@ -397,23 +392,19 @@ DWORD CConfigManager::GetOptimalBufferSize(const CString& sectionName)
 	DWORD initialSize;
 
 	if (fileSize == 0 || fileSize == INVALID_FILE_SIZE) {
-		// 파일 크기를 알 수 없으면 기본값
 		initialSize = 16 * 1024;  // 16KB
 		TRACE("파일 크기 확인 실패, 기본 버퍼 크기 사용: 16KB\n");
 	}
 	else if (fileSize < 8 * 1024) {
-		// 작은 파일 (8KB 미만)
 		initialSize = 16 * 1024;  // 16KB
 		TRACE("작은 파일 감지 (%d bytes), 16KB 버퍼 사용\n", fileSize);
 	}
 	else if (fileSize < 64 * 1024) {
-		// 중간 파일 (64KB 미만)
 		initialSize = fileSize * 2;  // 파일 크기의 2배
 		TRACE("중간 파일 감지 (%d bytes), %dKB 버퍼 사용\n",
 			fileSize, initialSize / 1024);
 	}
 	else {
-		// 큰 파일 (64KB 이상)
 		initialSize = 128 * 1024;  // 128KB
 		TRACE("큰 파일 감지 (%d bytes), 128KB 버퍼 사용\n", fileSize);
 	}
@@ -457,7 +448,6 @@ void CConfigManager::AddTagMapping(const CString& tagName, const CString& mappin
 	m_tagMappings[tagName] = mapping;
 	TRACE("태그 매핑 추가: %s -> %s\n", (LPCTSTR)tagName, (LPCTSTR)mapping);
 
-	// 즉시 INI 파일에 저장
 	WritePrivateProfileString(_T("TagMapping"), tagName, mapping, m_iniFilePath);
 }
 
@@ -466,7 +456,6 @@ void CConfigManager::SetTagMapping(const CString& tagName, const CString& mappin
 	m_tagMappings[tagName] = mapping;
 	TRACE("태그 매핑 설정: %s -> %s\n", (LPCTSTR)tagName, (LPCTSTR)mapping);
 
-	// 즉시 INI 파일에 저장
 	WritePrivateProfileString(_T("TagMapping"), tagName, mapping, m_iniFilePath);
 }
 
@@ -477,7 +466,6 @@ void CConfigManager::RemoveTagMapping(const CString& tagName)
 		m_tagMappings.erase(it);
 		TRACE("태그 매핑 삭제: %s\n", (LPCTSTR)tagName);
 
-		// 즉시 INI 파일에서 삭제
 		WritePrivateProfileString(_T("TagMapping"), tagName, NULL, m_iniFilePath);
 	}
 }
