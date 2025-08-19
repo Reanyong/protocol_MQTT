@@ -18,8 +18,8 @@
 #include "json.hpp"
 
 // EasyView 라이브러리
-#include "..\include\EVStruct.h"
-#include "..\Include\EVCommLib.h"
-#include "..\Include\EVILib.h"
+#include "..\..\include\EVStruct.h"
+#include "..\..\Include\EVCommLib.h"
+#include "..\..\Include\EVILib.h"
 
 #endif //PCH_H

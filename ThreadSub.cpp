@@ -101,7 +101,7 @@ END_MESSAGE_MAP()
 // CThreadSub message handlers
 
 #include <mosquitto.h>
-#pragma comment(lib, "..\\Lib\\mosquitto.lib")
+#pragma comment(lib, ".\\Lib\\mosquitto.lib")
 
 #define strdup _strdup
 
