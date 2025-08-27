@@ -28,14 +28,18 @@ CString CConfigManager::GetIniFilePath() const
 	TCHAR szPath[MAX_PATH] = { 0 };
 	GetModuleFileName(NULL, szPath, MAX_PATH);
 
-	// 실행 파일 이름 부분 제거하고 INI 파일 이름 추가
 	CString strPath(szPath);
 	int nPos = strPath.ReverseFind('\\');
 	if (nPos > 0) {
-		return strPath.Left(nPos + 1) + _T("EVMQTT_Config.ini");
+		CString exeName = strPath.Mid(nPos + 1);
+		int dotPos = exeName.ReverseFind('.');
+		if (dotPos > 0) {
+			exeName = exeName.Left(dotPos);
+		}
+		return strPath.Left(nPos + 1) + exeName + _T("_Config.ini");
 	}
 	else {
-		return _T("EVMQTT_Config.ini"); // 현재 디렉토리에 저장
+		return _T("EVMQTT_Config.ini");
 	}
 }
 
