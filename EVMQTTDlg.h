@@ -82,12 +82,17 @@ protected:
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 
 	// 파싱 통계 관련 함수
 	afx_msg LRESULT OnUpdateStats(WPARAM wParam, LPARAM lParam);
 
 	// 활동 로그 관련 함수
 	afx_msg LRESULT OnUpdateActivityLog(WPARAM wParam, LPARAM lParam);
+
+	// EasyView 엔진 종료 감지 관련
+	afx_msg LRESULT OnEasyViewStop(WPARAM wParam, LPARAM lParam);
+	virtual LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
 public:
@@ -137,11 +142,15 @@ private:
 	bool m_needActivityRefresh;      // 활동 로그 전체 갱신 필요 여부
 	std::vector<int> m_pendingActivityIndices;  // 대기 중인 활동 로그 인덱스
 
+	// EasyView 엔진 종료 감지 관련
+	static UINT m_wm_EVViewStop;     // EasyView 엔진 종료 메시지 ID
+	BOOL m_bEngineExit;              // 엔진 종료 플래그
+
 	// 내부 헬퍼 함수들
 	void UpdateActivityList();
-	void UpdateActivityListOptimized();  // 최적화된 업데이트 메서드
-	void TrimActivityLogs();         // 오래된 로그 제거
-	void AddActivityItemToList(const ActivityLogItem& logItem, int insertIndex);
+	//void UpdateActivityListOptimized(); // 최적화된 업데이트 메서드
+	void TrimActivityLogs();			// 오래된 로그 제거
+	//void AddActivityItemToList(const ActivityLogItem& logItem, int insertIndex);
 	COLORREF GetStatusColor(bool isGood);
 
 public:

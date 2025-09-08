@@ -3,7 +3,7 @@
 
 CConfigManager::CConfigManager()
 	: m_parsingInterval(1000) // 기본값 1초
-	, m_tagGroup(_T(""))
+	// , m_tagGroup(_T(""))
 	, m_mqttIp(_T("127.0.0.1"))   // 기본 IP
 	, m_mqttPort(1883)            // 기본 포트
 	, m_mqttKeepAlive(60)         // 기본 keepalive
@@ -52,10 +52,10 @@ bool CConfigManager::LoadConfig()
 		m_parsingInterval = GetPrivateProfileInt(_T("General"), _T("ParsingInterval"),
 			1000, m_iniFilePath);
 
-		TCHAR szTagGroup[64] = { 0 };
-		GetPrivateProfileString(_T("TagInfo"), _T("TagGroup"), _T("MQTT"),
-			szTagGroup, 64, m_iniFilePath);
-		m_tagGroup = szTagGroup;
+		// TCHAR szTagGroup[64] = { 0 };
+		// GetPrivateProfileString(_T("TagInfo"), _T("TagGroup"), _T("MQTT"),
+		//	 szTagGroup, 64, m_iniFilePath);
+		// m_tagGroup = szTagGroup;
 
 		// MQTT 설정
 		TCHAR szMqttIp[64] = { 0 };
@@ -106,7 +106,7 @@ bool CConfigManager::SaveConfig()
 		strKeepAlive.Format(_T("%d"), m_mqttKeepAlive);
 		WritePrivateProfileString(_T("General"), _T("KeepAlive"), strKeepAlive, m_iniFilePath);
 
-		WritePrivateProfileString(_T("TagInfo"), _T("TagGroup"), m_tagGroup, m_iniFilePath);
+		// WritePrivateProfileString(_T("TagInfo"), _T("TagGroup"), m_tagGroup, m_iniFilePath);
 
 		WritePrivateProfileString(_T("General"), _T("Device"), m_device, m_iniFilePath);
 
@@ -132,15 +132,15 @@ int CConfigManager::GetParsingInterval() const
 	return m_parsingInterval;
 }
 
-CString CConfigManager::GetTagGroup() const
-{
-	return m_tagGroup;
-}
+// CString CConfigManager::GetTagGroup() const
+// {
+//	return m_tagGroup;
+// }
 
-void CConfigManager::SetTagGroup(const CString& tagGroup)
-{
-	m_tagGroup = tagGroup;
-}
+// void CConfigManager::SetTagGroup(const CString& tagGroup)
+// {
+//	m_tagGroup = tagGroup;
+// }
 
 std::map<CString, CString> CConfigManager::GetAllTagMappings() const
 {

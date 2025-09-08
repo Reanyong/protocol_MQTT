@@ -47,15 +47,53 @@ int CMqttWorkerThread::Run()
 	TRACE("=== Worker Thread %d Started (TID: %d) ===\n",
 		m_workerID, GetCurrentThreadId());
 
-	// 초기화 상태 체크
+	// 초기화 상태 체크 - 강화된 검증
 	TRACE("Worker %d: Checking initialization...\n", m_workerID);
 	TRACE("Worker %d: MessageQueue = %p\n", m_workerID, m_pMessageQueue);
 	TRACE("Worker %d: Owner = %p\n", m_workerID, m_pOwner);
 	TRACE("Worker %d: EndThread = %s\n", m_workerID, m_bEndThread ? "TRUE" : "FALSE");
+	TRACE("Worker %d: WorkerID = %d\n", m_workerID, m_workerID);
+	TRACE("Worker %d: BatchSize = %d\n", m_workerID, m_batchSize);
+	TRACE("Worker %d: BatchTimeout = %d\n", m_workerID, m_batchTimeoutMs);
 
+	// 필수 조건 검증
 	if (!m_pMessageQueue) {
-		TRACE("ERROR: Worker %d - Message queue is NULL! Exiting...\n", m_workerID);
+		TRACE("CRITICAL ERROR: Worker %d - Message queue is NULL! Exiting...\n", m_workerID);
 		return -1;
+	}
+
+	if (!m_pOwner) {
+		TRACE("WARNING: Worker %d - Owner is NULL! UI updates will not work\n", m_workerID);
+	}
+
+	if (m_workerID <= 0) {
+		TRACE("ERROR: Worker %d - Invalid worker ID! Exiting...\n", m_workerID);
+		return -2;
+	}
+
+	if (m_batchSize <= 0 || m_batchTimeoutMs <= 0) {
+		TRACE("ERROR: Worker %d - Invalid batch settings! BatchSize=%d, Timeout=%d\n", 
+			m_workerID, m_batchSize, m_batchTimeoutMs);
+		return -3;
+	}
+
+	// 메시지 큐 상태 검증
+	try {
+		if (m_pMessageQueue->IsShutdown()) {
+			TRACE("ERROR: Worker %d - Message queue is already shutdown! Exiting...\n", m_workerID);
+			return -4;
+		}
+		
+		size_t queueSize = m_pMessageQueue->Size();
+		TRACE("Worker %d: Message queue initial size = %d\n", m_workerID, queueSize);
+	}
+	catch (const std::exception& e) {
+		TRACE("ERROR: Worker %d - Exception during queue validation: %s\n", m_workerID, e.what());
+		return -5;
+	}
+	catch (...) {
+		TRACE("ERROR: Worker %d - Unknown exception during queue validation\n", m_workerID);
+		return -6;
 	}
 
 	TRACE("Worker %d: Initialization OK, starting main loop...\n", m_workerID);

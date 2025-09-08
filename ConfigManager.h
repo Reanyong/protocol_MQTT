@@ -19,8 +19,8 @@ public:
 	static CConfigManager& GetInstance();
 
 	// 태그 매핑 관련 메서드
-	CString GetTagGroup() const;
-	void SetTagGroup(const CString& tagGroup);
+	// CString GetTagGroup() const;
+	// void SetTagGroup(const CString& tagGroup);
 
 	// 모든 태그 매핑 조회
 	std::map<CString, CString> GetAllTagMappings() const;
@@ -68,7 +68,7 @@ public:
 private:
 	int m_parsingInterval;
 	CString m_iniFilePath;
-	CString m_tagGroup;
+	// CString m_tagGroup;
 	CString m_mqttIp;
 	int m_mqttPort;
 	int m_mqttKeepAlive;

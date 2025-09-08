@@ -376,8 +376,8 @@ int CThreadSub::Run()
 	{
 		dwCur = GetTickCount();
 
-		// MQTT 메시지 처리 (논블로킹)
-		nNetworkLoop = mosquitto_loop(mosq, 1, 1);
+		// MQTT 메시지 처리 (논블로킹) - 타임아웃 최적화
+		nNetworkLoop = mosquitto_loop(mosq, 10, 1);
 		if (nNetworkLoop != MOSQ_ERR_SUCCESS) {
 			TRACE("mosquitto_loop error: %d\n", nNetworkLoop);
 
@@ -428,8 +428,8 @@ int CThreadSub::Run()
 			PrintThreadStatus();
 		}
 
-		// CPU 사용률 조절
-		Sleep(1);
+		// CPU 사용률 조절 - MQTT 루프 타임아웃과 조화
+		Sleep(5);
 	}
 
 	// 정리 작업
@@ -496,25 +496,53 @@ void CThreadSub::CreateWorkerThreads()
 
 				TRACE("Worker thread %d properties set, resuming thread...\n", i + 1);
 
-				// 스레드 시작
+				// 스레드 시작 - 에러 처리 강화
 				DWORD resumeResult = pWorker->ResumeThread();
 				TRACE("Worker thread %d ResumeThread result: %d\n", i + 1, resumeResult);
 
-				// 스레드가 실제로 시작될 시간 주기
-				Sleep(50);
+				if (resumeResult == 0xFFFFFFFF) {
+					TRACE("CRITICAL ERROR: ResumeThread failed for worker %d (Error: %d)\n", i + 1, GetLastError());
+					
+					// 실패한 스레드 정리
+					delete pWorker;
+					continue; // 다음 스레드 생성 시도
+				}
 
-				// 스레드 상태 확인
+				// 스레드가 실제로 시작될 시간을 더 충분히 제공
+				Sleep(200);
+
+				// 스레드 상태 확인 - 더 엄격한 검증
 				DWORD exitCode;
 				if (GetExitCodeThread(pWorker->m_hThread, &exitCode)) {
 					if (exitCode == STILL_ACTIVE) {
-						TRACE("Worker thread %d is running (STILL_ACTIVE)\n", i + 1);
+						TRACE("SUCCESS: Worker thread %d is running (STILL_ACTIVE)\n", i + 1);
+						
+						// 추가 검증: 스레드가 실제로 동작하는지 확인
+						if (pWorker->m_hThread && pWorker->m_nThreadID > 0) {
+							TRACE("Worker thread %d validation passed (TID: %d)\n", i + 1, pWorker->m_nThreadID);
+						}
+						else {
+							TRACE("WARNING: Worker thread %d has invalid handle or ID\n", i + 1);
+						}
 					}
 					else {
-						TRACE("WARNING: Worker thread %d already exited with code %d\n", i + 1, exitCode);
+						TRACE("CRITICAL ERROR: Worker thread %d already exited with code %d\n", i + 1, exitCode);
+						
+						// 실패한 스레드 정리 - 재시도 로직 추가
+						delete pWorker;
+						
+						// 한 번 더 시도
+						TRACE("Retrying worker thread %d creation...\n", i + 1);
+						i--; // 인덱스 되돌려서 재시도
+						continue;
 					}
 				}
 				else {
-					TRACE("ERROR: Cannot get thread status for worker %d\n", i + 1);
+					TRACE("CRITICAL ERROR: Cannot get thread status for worker %d (Error: %d)\n", i + 1, GetLastError());
+					
+					// 상태 확인 실패한 스레드도 정리
+					delete pWorker;
+					continue;
 				}
 
 				m_workerThreads.push_back(pWorker);
@@ -534,10 +562,47 @@ void CThreadSub::CreateWorkerThreads()
 		}
 	}
 
-	TRACE("Worker thread creation completed - Total: %d\n", m_workerThreads.size());
+	TRACE("Worker thread creation completed - Total: %d (Target: %d)\n", m_workerThreads.size(), m_workerThreadCount);
+
+	// 최소한의 워커 스레드가 생성되었는지 검증
+	if (m_workerThreads.size() == 0) {
+		TRACE("CRITICAL ERROR: No worker threads were created successfully!\n");
+		// UI에 오류 알림
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			pDlg->AddActivityLog(_T("시스템"), _T("워커 스레드 생성 실패"), ActivityLogItem::LOG_ERROR, _T("실패"));
+		}
+	}
+	else if (m_workerThreads.size() < m_workerThreadCount / 2) {
+		TRACE("WARNING: Only %d out of %d worker threads created successfully!\n", 
+			m_workerThreads.size(), m_workerThreadCount);
+		
+		// UI에 경고 알림
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			CString warningMsg;
+			warningMsg.Format(_T("워커 %d/%d개만 생성됨"), m_workerThreads.size(), m_workerThreadCount);
+			pDlg->AddActivityLog(_T("시스템"), warningMsg, ActivityLogItem::LOG_ERROR, _T("경고"));
+		}
+	}
+	else {
+		TRACE("SUCCESS: Worker threads created successfully (%d/%d)\n", 
+			m_workerThreads.size(), m_workerThreadCount);
+			
+		// UI에 성공 알림
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			CString successMsg;
+			successMsg.Format(_T("워커 %d개 생성 완료"), m_workerThreads.size());
+			pDlg->AddActivityLog(_T("시스템"), successMsg, ActivityLogItem::LOG_INFO, _T("성공"));
+		}
+	}
 
 	// 모든 워커가 실제로 시작되었는지 한번 더 확인
-	Sleep(200);
+	Sleep(300);  // 더 충분한 시간 제공
 	TRACE("Final check - verifying all workers are still running...\n");
 
 	for (size_t i = 0; i < m_workerThreads.size(); i++) {

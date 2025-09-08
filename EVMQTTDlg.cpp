@@ -11,6 +11,8 @@
 #define new DEBUG_NEW
 #endif
 
+UINT CEVMQTTDlg::m_wm_EVViewStop = 0;
+
 // 응용 프로그램 정보에 사용되는 CAboutDlg 대화 상자입니다.
 class CAboutDlg : public CDialogEx
 {
@@ -63,6 +65,10 @@ CEVMQTTDlg::CEVMQTTDlg(CWnd* pParent /*=nullptr*/)
 	// 최적화 변수 초기화
 	m_lastActivityUpdate = 0;
 	m_needActivityRefresh = false;
+
+	// EasyView 엔진 종료 감지 관련 초기화
+	m_wm_EVViewStop = 0;
+	m_bEngineExit = FALSE;
 }
 
 void CEVMQTTDlg::DoDataExchange(CDataExchange* pDX)
@@ -79,11 +85,13 @@ BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
 	ON_WM_SYSCOMMAND()
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
+	ON_WM_TIMER()
 	ON_BN_CLICKED(IDC_BTN_SUB, &CEVMQTTDlg::OnBnClickedBtnSub)
 	ON_BN_CLICKED(IDOK, &CEVMQTTDlg::OnBnClickedOk)
 	ON_BN_CLICKED(IDCANCEL, &CEVMQTTDlg::OnBnClickedCancel)
 	ON_MESSAGE(WM_USER + 100, OnUpdateStats)
 	ON_MESSAGE(WM_USER + 102, OnUpdateActivityLog)
+	ON_REGISTERED_MESSAGE(m_wm_EVViewStop, OnEasyViewStop)
 	ON_BN_CLICKED(IDC_BTN_CONFIG, &CEVMQTTDlg::OnBnClickedBtnConfig)
 	ON_BN_CLICKED(IDC_BTN_VIEW_LOG, &CEVMQTTDlg::OnBnClickedBtnViewLog)
 END_MESSAGE_MAP()
@@ -119,6 +127,28 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	// 새로운 UI 초기화
 	InitStatusControls();
 	InitActivityList();
+
+	// EasyView 엔진 종료 메시지 등록 - 실제 프로젝트명 사용
+	char szBuff[256] = { 0 };
+	char szProjectName[256] = { 0 };
+	
+	// EasyView 설정에서 실제 프로젝트명 읽기
+	EV_GetConfigFile(szBuff);
+	::GetPrivateProfileString(
+		"EasyView", "Project", "EVMQTT", szProjectName,
+		sizeof(szProjectName), szBuff
+	);
+	
+	char buf[512];
+	sprintf_s(buf, sizeof(buf), "GM_EVVIEW_END_%s", szProjectName);
+	m_wm_EVViewStop = RegisterWindowMessage(CString(buf));
+	
+	TRACE("=== EasyView 메시지 등록 정보 ===\n");
+	TRACE("Config 경로: %s\n", szBuff);
+	TRACE("프로젝트명: %s\n", szProjectName);
+	TRACE("등록 메시지: %s\n", buf);
+	TRACE("메시지 ID: %d\n", m_wm_EVViewStop);
+	TRACE("===============================\n");
 
 	// 초기 상태 설정
 	CConfigManager& configManager = CConfigManager::GetInstance();
@@ -465,11 +495,11 @@ void CEVMQTTDlg::UpdateActivityList()
 		}
 	}
 
-	// 첫 번째 항목으로 스크롤
-	if (m_listActivity.GetItemCount() > 0)
-	{
-		m_listActivity.EnsureVisible(0, FALSE);
-	}
+	//// 첫 번째 항목으로 스크롤
+	//if (m_listActivity.GetItemCount() > 0)
+	//{
+	//	m_listActivity.EnsureVisible(0, FALSE);
+	//}
 }
 
 void CEVMQTTDlg::TrimActivityLogs()
@@ -663,4 +693,95 @@ void CEVMQTTDlg::OnBnClickedBtnViewLog()
 		// 성공적으로 열린 경우 활동 로그에 기록
 		AddActivityLog(_T("시스템"), _T("로그 파일 열기"), ActivityLogItem::LOG_INFO, _T("완료"));
 	}
+}
+
+// ==============================================
+// EasyView 엔진 종료 감지 관련 함수
+// ==============================================
+
+LRESULT CEVMQTTDlg::OnEasyViewStop(WPARAM wParam, LPARAM lParam)
+{
+	TRACE("=== EasyView 엔진 종료 신호 수신 ===\n");
+	TRACE("메시지 ID: %d (등록된 ID: %d)\n", m_wm_EVViewStop, m_wm_EVViewStop);
+	TRACE("wParam: %d, lParam: %d\n", wParam, lParam);
+	TRACE("현재 시간: %s\n", CTime::GetCurrentTime().Format("%Y-%m-%d %H:%M:%S"));
+
+	// 엔진 종료 플래그 설정
+	m_bEngineExit = TRUE;
+
+	// 활동 로그에 기록
+	AddActivityLog(_T("시스템"), _T("EasyView 엔진 종료 감지"), ActivityLogItem::LOG_ERROR, _T("종료중"));
+
+	// MQTT 통신 안전하게 중지
+	if (m_pThreadSub != NULL)
+	{
+		TRACE("MQTT 통신 스레드 안전 종료 시작\n");
+		StopThreadSub();
+		DeleteThreadSub();
+		TRACE("MQTT 통신 스레드 종료 완료\n");
+	}
+
+	// 약간의 지연 후 프로그램 종료
+	SetTimer(9999, 500, NULL);  // 0.5초 후 타이머 이벤트로 종료
+
+	return 1L;
+}
+
+void CEVMQTTDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == 9999 && m_bEngineExit)
+	{
+		// EasyView 엔진 종료로 인한 프로그램 종료
+		TRACE("EasyView 엔진 종료로 인한 프로그램 종료 실행\n");
+		
+		KillTimer(9999);
+		
+		// 최종 정리 작업
+		AddActivityLog(_T("시스템"), _T("프로그램 종료"), ActivityLogItem::LOG_INFO, _T("종료"));
+		
+		// 프로그램 종료
+		PostMessage(WM_CLOSE);
+		return;
+	}
+
+	CDialogEx::OnTimer(nIDEvent);
+}
+
+LRESULT CEVMQTTDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
+{
+	// EasyView 종료 메시지 감지를 위한 모든 메시지 모니터링
+	static DWORD lastLogTime = 0;
+	DWORD currentTime = GetTickCount();
+	
+	// REGISTERED_MESSAGE 범위 체크 (보통 0xC000 ~ 0xFFFF)
+	if (message >= 0xC000 && message <= 0xFFFF)
+	{
+		// 5초마다 한번씩만 로깅 (스팸 방지)
+		if (currentTime - lastLogTime > 5000)
+		{
+			TRACE("REGISTERED_MESSAGE 수신: 0x%04X (등록된 EasyView ID: 0x%04X)\n", message, m_wm_EVViewStop);
+			lastLogTime = currentTime;
+		}
+		
+		// EasyView 종료 메시지인지 확인
+		if (message == m_wm_EVViewStop)
+		{
+			TRACE("!!! EasyView 종료 메시지 WindowProc에서 감지 !!!\n");
+			return OnEasyViewStop(wParam, lParam);
+		}
+		
+		// GM_EVVIEW_END로 시작하는 다른 메시지들도 체크
+		char msgName[256] = { 0 };
+		if (GetClipboardFormatName(message, msgName, sizeof(msgName)) > 0)
+		{
+			if (strstr(msgName, "GM_EVVIEW_END") != nullptr)
+			{
+				TRACE("!!! 다른 EasyView 종료 메시지 발견: %s (ID: 0x%04X) !!!\n", msgName, message);
+				// 강제로 종료 처리
+				return OnEasyViewStop(wParam, lParam);
+			}
+		}
+	}
+	
+	return CDialogEx::WindowProc(message, wParam, lParam);
 }
