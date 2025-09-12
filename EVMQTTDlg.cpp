@@ -143,6 +143,22 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	sprintf_s(buf, sizeof(buf), "GM_EVVIEW_END_%s", szProjectName);
 	m_wm_EVViewStop = RegisterWindowMessage(CString(buf));
 	
+	// 현재 실행파일 이름으로 윈도우 타이틀 설정
+	TCHAR szModulePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, szModulePath, MAX_PATH);
+	
+	CString strModulePath(szModulePath);
+	int nPos = strModulePath.ReverseFind(_T('\\'));
+	if (nPos > 0) {
+		CString exeName = strModulePath.Mid(nPos + 1);
+		int dotPos = exeName.ReverseFind(_T('.'));
+		if (dotPos > 0) {
+			exeName = exeName.Left(dotPos);
+		}
+		SetWindowText(exeName);
+		TRACE("윈도우 타이틀 설정: %s\n", (LPCTSTR)exeName);
+	}
+	
 	TRACE("=== EasyView 메시지 등록 정보 ===\n");
 	TRACE("Config 경로: %s\n", szBuff);
 	TRACE("프로젝트명: %s\n", szProjectName);
@@ -249,12 +265,18 @@ void CEVMQTTDlg::BeginThreadSub()
 			THREAD_PRIORITY_HIGHEST, 0, CREATE_SUSPENDED);
 		m_pThreadSub->m_pOwner = this;
 
+		CConfigManager& configManager = CConfigManager::GetInstance();
+		
+		// 로그 파일에 MQTT 시작 기록
+		CLogManager& logManager = CLogManager::GetInstance();
+		logManager.WriteErrorLog(_T("MQTT"), _T("시작"), _T("MQTT 연결 시작"));
+		
 		// 스레드 시작
 		m_pThreadSub->ResumeThread();
 
 		// 연결 상태 업데이트
-		CConfigManager& configManager = CConfigManager::GetInstance();
 		UpdateMqttStatus(true, configManager.GetMqttIp(), configManager.GetMqttPort());
+		UpdateTagInfo(0, configManager.GetAllTagMappings().size());
 		AddActivityLog(_T("MQTT"), _T("연결 시도"), ActivityLogItem::LOG_CONNECTION, _T("진행중"));
 	}
 }
@@ -315,16 +337,11 @@ void CEVMQTTDlg::DeleteThreadSub()
 	}
 }
 
-// ===============================
-// 새로운 UI 관련 함수들
-// ===============================
-
 void CEVMQTTDlg::InitStatusControls()
 {
 	// 활동 라벨 설정
 	m_staticActivityLabel.SetWindowText(_T("최근 활동"));
 
-	// 폰트 설정 (선택사항)
 	CFont* pFont = GetFont();
 	if (pFont)
 	{
@@ -385,10 +402,21 @@ void CEVMQTTDlg::UpdateTagInfo(int activeTagCount, int totalTagCount)
 	m_nTotalTagCount = totalTagCount;
 
 	CString statusText;
-	statusText.Format(_T("태그 매핑: %d개 활성"), activeTagCount);
-	if (totalTagCount > 0)
-	{
-		statusText.AppendFormat(_T(" / %d개 전체"), totalTagCount);
+	
+	if (activeTagCount == 0 && totalTagCount > 0) {
+		// 전체 태그는 있지만 유효한 태그가 0개인 경우
+		statusText.Format(_T("태그 매핑: 사용 불가 (%d개 중 0개 유효)"), totalTagCount);
+	}
+	else if (totalTagCount == 0) {
+		// 태그 자체가 없는 경우
+		statusText = _T("태그 매핑: 설정 없음");
+	}
+	else {
+		// 정상적인 경우
+		statusText.Format(_T("태그 매핑: %d개 활성"), activeTagCount);
+		if (totalTagCount > 0) {
+			statusText.AppendFormat(_T(" / %d개 전체"), totalTagCount);
+		}
 	}
 
 	m_staticTagInfo.SetWindowText(statusText);
@@ -417,7 +445,7 @@ void CEVMQTTDlg::AddActivityLog(const CString& tagName, const CString& value,
 	TRACE("value 주소: %p, 내용: [%s]\n", &value, (LPCTSTR)value);
 	TRACE("status 주소: %p, 내용: [%s]\n", &status, (LPCTSTR)status);
 
-	// 🔍 status 문자열의 각 바이트 확인
+	// status 문자열의 각 바이트 확인
 	TRACE("status 길이: %d\n", status.GetLength());
 	for (int i = 0; i < min(status.GetLength(), 10); i++) {
 		TCHAR ch = status.GetAt(i);
@@ -425,7 +453,7 @@ void CEVMQTTDlg::AddActivityLog(const CString& tagName, const CString& value,
 			(ch >= 32 && ch <= 126) ? ch : '?', (unsigned int)ch);
 	}
 
-	// 🔍 임시 객체 생성해서 비교
+	// 임시 객체 생성해서 비교
 	CString tempStatus = status;  // 복사 생성
 	TRACE("tempStatus 주소: %p, 내용: [%s]\n", &tempStatus, (LPCTSTR)tempStatus);
 

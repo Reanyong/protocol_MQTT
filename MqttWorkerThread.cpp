@@ -263,8 +263,10 @@ bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
 			static int parseErrorCount = 0;
 			if (++parseErrorCount % 50 == 0) { // 50번에 1번만
 				CString errorMsg;
-				errorMsg.Format(_T("오류 %d회"), parseErrorCount);
-				SendTagUpdateToUI(_T("파싱오류"), errorMsg, false);
+				errorMsg.Format(_T("JSON파싱 실패 (x%d)"), parseErrorCount);
+				CString topicInfo;
+				topicInfo.Format(_T("토픽: %s"), msg.topic.c_str());
+				SendTagUpdateToUI(topicInfo, errorMsg, false);
 
 				// 실패 로그 기록
 				CLogManager& logManager = CLogManager::GetInstance();
@@ -297,19 +299,24 @@ bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
 			// 매우 제한적으로만 UI 업데이트
 			if (successCount % 200 == 0) { // 200번에 1번만
 				CString extractedValue = ExtractRepresentativeValue(msg.payload);
-				SendTagUpdateToUI(mqttTopic, extractedValue, true);
+				CString topicInfo;
+				topicInfo.Format(_T("토픽: %s"), mqttTopic);
+				SendTagUpdateToUI(topicInfo, extractedValue, true);
 			}
 
 			return true;
 		}
 		else
 		{
-			// 실패한 경우도 빈도 제한
+			// 실패한 경우: 유효한 태그가 없으면 아예 UI 업데이트 안함
+			// (ParserJSON에서 이미 return false 했으므로 여기 오면 실제 매핑 실패)
 			static int tagErrorCount = 0;
-			if (++tagErrorCount % 25 == 0) { // 25번에 1번
+			if (++tagErrorCount % 50 == 0) { // 빈도 더 줄임 (50번에 1번)
 				CString errorMsg;
-				errorMsg.Format(_T("태그매핑 실패 (x%d)"), tagErrorCount);
-				SendTagUpdateToUI(mqttTopic, errorMsg, false);
+				errorMsg.Format(_T("EasyView 연결 확인 필요 (x%d)"), tagErrorCount);
+				CString topicInfo;
+				topicInfo.Format(_T("토픽: %s"), mqttTopic);
+				SendTagUpdateToUI(topicInfo, errorMsg, false);
 			}
 			return false;
 		}
@@ -319,7 +326,9 @@ bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
 		// 예외는 항상 UI에 알림 (중요하므로)
 		CString errorMsg;
 		errorMsg.Format(_T("예외: %hs"), e.what());
-		SendTagUpdateToUI(CString(msg.topic.c_str()), errorMsg, false);
+		CString topicInfo;
+		topicInfo.Format(_T("토픽: %s"), msg.topic.c_str());
+		SendTagUpdateToUI(topicInfo, errorMsg, false);
 		return false;
 	}
 }

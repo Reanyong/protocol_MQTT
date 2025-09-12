@@ -299,6 +299,7 @@ int CThreadSub::Run()
 	CString mqttIp = configManager.GetMqttIp();
 	int mqttPort = configManager.GetMqttPort();
 	int mqttKeepAlive = configManager.GetMqttKeepAlive();
+	CString subscribeTopic = configManager.GetSubscribeTopic();
 
 	// UI에 초기 연결 시도 알림
 	if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
@@ -308,8 +309,9 @@ int CThreadSub::Run()
 	}
 
 	CT2A hostA(mqttIp);
+	CT2A topicA(subscribeTopic);
 	char* mqtt_host = strdup(hostA);
-	char* mqtt_topic = strdup("+");
+	char* mqtt_topic = strdup(topicA);
 	int mqtt_port = mqttPort;
 	int mqtt_keepalive = mqttKeepAlive;
 
@@ -388,11 +390,26 @@ int CThreadSub::Run()
 				pDlg->OnMqttConnectionChanged(false);
 			}
 
-			Sleep(1000);
+			Sleep(100);
 
 			// 재연결 시도
 			if (mosquitto_reconnect(mosq) == MOSQ_ERR_SUCCESS) {
 				TRACE("MQTT reconnection successful\n");
+				
+				// UI에 재연결 성공 알림
+				if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+				{
+					CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+					pDlg->OnMqttConnectionChanged(true);
+				}
+				
+				// 재연결 후 다시 구독
+				int subscribe_result = mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
+				if (subscribe_result == MOSQ_ERR_SUCCESS) {
+					TRACE("MQTT re-subscription successful: %s\n", mqtt_topic);
+				} else {
+					TRACE("MQTT re-subscription failed: %d (topic: %s)\n", subscribe_result, mqtt_topic);
+				}
 			}
 		}
 
@@ -509,9 +526,9 @@ void CThreadSub::CreateWorkerThreads()
 				}
 
 				// 스레드가 실제로 시작될 시간을 더 충분히 제공
-				Sleep(200);
+				Sleep(20);
 
-				// 스레드 상태 확인 - 더 엄격한 검증
+				// 스레드 상태 확인
 				DWORD exitCode;
 				if (GetExitCodeThread(pWorker->m_hThread, &exitCode)) {
 					if (exitCode == STILL_ACTIVE) {
@@ -602,7 +619,7 @@ void CThreadSub::CreateWorkerThreads()
 	}
 
 	// 모든 워커가 실제로 시작되었는지 한번 더 확인
-	Sleep(300);  // 더 충분한 시간 제공
+	Sleep(10);  // 더 충분한 시간 제공
 	TRACE("Final check - verifying all workers are still running...\n");
 
 	for (size_t i = 0; i < m_workerThreads.size(); i++) {
@@ -665,7 +682,7 @@ void CThreadSub::DestroyWorkerThreads()
 				break;
 			}
 
-			Sleep(100);
+			Sleep(10);
 			waitCount++;
 		}
 

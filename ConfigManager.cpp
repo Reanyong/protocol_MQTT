@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "ConfigManager.h"
+#include "LogManager.h"
 
 CConfigManager::CConfigManager()
 	: m_parsingInterval(1000) // 기본값 1초
@@ -7,6 +8,7 @@ CConfigManager::CConfigManager()
 	, m_mqttIp(_T("127.0.0.1"))   // 기본 IP
 	, m_mqttPort(1883)            // 기본 포트
 	, m_mqttKeepAlive(60)         // 기본 keepalive
+	, m_subscribeTopic(_T("+"))   // 기본값 모든 토픽
 	, m_device(_T(""))
 {
 	// INI 파일 경로 설정 (실행 파일과 같은 경로에 저장)
@@ -63,11 +65,14 @@ bool CConfigManager::LoadConfig()
 			szMqttIp, 64, m_iniFilePath);
 		m_mqttIp = szMqttIp;
 
-		// Device 설정
-		TCHAR szDevice[64] = { 0 };
-		GetPrivateProfileString(_T("General"), _T("Device"), _T(""),
-			szDevice, 64, m_iniFilePath);
-		m_device = szDevice;
+		// Device 설정 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
+		m_device = _T("");
+
+		// MQTT 구독 토픽 설정
+		TCHAR szSubscribeTopic[128] = { 0 };
+		GetPrivateProfileString(_T("General"), _T("SubscribeTopic"), _T("+"),
+			szSubscribeTopic, 128, m_iniFilePath);
+		m_subscribeTopic = szSubscribeTopic;
 
 		m_mqttPort = GetPrivateProfileInt(_T("General"), _T("Port"), 1883, m_iniFilePath);
 		m_mqttKeepAlive = GetPrivateProfileInt(_T("General"), _T("KeepAlive"), 60, m_iniFilePath);
@@ -108,7 +113,10 @@ bool CConfigManager::SaveConfig()
 
 		// WritePrivateProfileString(_T("TagInfo"), _T("TagGroup"), m_tagGroup, m_iniFilePath);
 
-		WritePrivateProfileString(_T("General"), _T("Device"), m_device, m_iniFilePath);
+		// Device 설정 저장 제거 (사용하지 않음)
+
+		// MQTT 구독 토픽 저장
+		WritePrivateProfileString(_T("General"), _T("SubscribeTopic"), m_subscribeTopic, m_iniFilePath);
 
 		result = result && SaveTagMappings();
 
@@ -146,6 +154,7 @@ std::map<CString, CString> CConfigManager::GetAllTagMappings() const
 {
 	return m_tagMappings;
 }
+
 
 bool CConfigManager::LoadTagMappings()
 {
@@ -518,14 +527,27 @@ int CConfigManager::GetMqttKeepAlive() const
 	return m_mqttKeepAlive;
 }
 
-// Device 관련 메서드
+// Device 관련 메서드 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
 void CConfigManager::SetDevice(const CString& deviceType)
 {
-	m_device = deviceType;
-	TRACE("Device 설정: %s\n", (LPCTSTR)deviceType);
+	// Device 설정 무시 - 모든 데이터에 1 곱하기 적용
+	TRACE("Device 설정 무시됨 (모든 데이터에 1 곱하기 적용): %s\n", (LPCTSTR)deviceType);
 }
 
 CString CConfigManager::GetDevice() const
 {
-	return m_device;
+	// 빈 문자열 반환 - Device 설정 사용하지 않음
+	return _T("");
+}
+
+// MQTT 구독 토픽 관련 메서드
+void CConfigManager::SetSubscribeTopic(const CString& topic)
+{
+	m_subscribeTopic = topic;
+	TRACE("구독 토픽 설정: %s\n", (LPCTSTR)topic);
+}
+
+CString CConfigManager::GetSubscribeTopic() const
+{
+	return m_subscribeTopic;
 }

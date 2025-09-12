@@ -23,15 +23,34 @@ CString CLogManager::CreateLogFilePath() const
 	TCHAR szPath[MAX_PATH] = { 0 };
 	GetModuleFileName(NULL, szPath, MAX_PATH);
 
-	// 실행 파일 디렉토리에 로그 파일 생성
 	CString strPath(szPath);
 	int nPos = strPath.ReverseFind('\\');
+	CString strDir, strFileName;
+	
 	if (nPos > 0) {
-		return strPath.Left(nPos + 1) + _T("EVMQTT.log");
+		strDir = strPath.Left(nPos + 1);
+		strFileName = strPath.Mid(nPos + 1);
 	}
 	else {
-		return _T("EVMQTT.log");
+		strDir = _T("");
+		strFileName = strPath;
 	}
+	
+	// 확장자 제거
+	int nDotPos = strFileName.ReverseFind('.');
+	if (nDotPos > 0) {
+		strFileName = strFileName.Left(nDotPos);
+	}
+	
+	// 실행 파일명에 기반한 로그 파일 생성
+	// EVMQTT1.exe -> EVMQTT1.log
+	// EVMQTT2.exe -> EVMQTT2.log  
+	// EVMQTT.exe -> EVMQTT.log
+	CString logFilePath = strDir + strFileName + _T(".log");
+	
+	TRACE("실행 파일: %s -> 로그 파일: %s\n", (LPCTSTR)strPath, (LPCTSTR)logFilePath);
+	
+	return logFilePath;
 }
 
 void CLogManager::WriteErrorLog(const CString& logType, const CString& source,

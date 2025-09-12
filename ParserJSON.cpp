@@ -75,7 +75,7 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 
 	TRACE("=== MQTT 토픽별 태그 매핑 적용 시작 ===\n");
 	TRACE("받은 MQTT 토픽: %S\n", (LPCTSTR)mqttTopic);
-	TRACE("Device Type: %s\n", (LPCTSTR)deviceType);
+	TRACE("데이터 처리: 모든 데이터에 1 곱하기 적용 (Device 설정 무시)\n");
 
 	if (tagMappings.empty()) {
 		TRACE("태그 매핑이 비어있습니다.\n");
@@ -182,46 +182,41 @@ bool CJsonParser::ApplyValueToTagOptimized(const CString& tagName, const CString
 
 		TRACE("JSONPath로 값 추출 성공\n");
 
-		// SMC_PF3A703H Device일 때 32bit에서 상위 16bit 추출
-		CConfigManager& configManager = CConfigManager::GetInstance();
-		CString deviceType = configManager.GetDevice();
+		// 모든 데이터에 대해 32bit에서 상위 16bit 추출 (DEVICE 설정 무관)
+		uint32_t processData = 0;
+		bool validData = false;
+
+		// 숫자 타입인 경우
+		if (pValue->is_number()) {
+			processData = static_cast<uint32_t>(pValue->get<double>());
+			validData = true;
+			TRACE("숫자 데이터: %.0f (0x%08X)\n", pValue->get<double>(), processData);
+		}
+		// 문자열 타입인 경우 (16진수 처리)
+		else if (pValue->is_string()) {
+			std::string hexStr = pValue->get<std::string>();
+			TRACE("문자열 데이터: %s\n", hexStr.c_str());
+
+			// 16진수 문자열 변환 (8자리 또는 0x 접두사 처리)
+			if ((hexStr.length() == 8 && hexStr.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos) ||
+				(hexStr.length() == 10 && hexStr.substr(0, 2) == "0x")) {
+
+				const char* hexStart = (hexStr.substr(0, 2) == "0x") ? hexStr.c_str() + 2 : hexStr.c_str();
+				processData = static_cast<uint32_t>(strtoul(hexStart, nullptr, 16));
+				validData = true;
+				TRACE("16진수 문자열 변환: %s → 0x%08X (%u)\n", hexStr.c_str(), processData, processData);
+			}
+		}
 
 		nlohmann::json processedValue = *pValue;  // 기본값은 원본 그대로
 
-		if (deviceType.CompareNoCase(_T("SMC_PF3A703H")) == 0) {
-			uint32_t processData = 0;
-			bool validData = false;
+		if (validData) {
+			// Bit 16-31이 Flow measurement value (상위 16비트)
+			int16_t flowPD = static_cast<int16_t>((processData >> 16) & 0xFFFF);
+			processedValue = flowPD;
 
-			// 숫자 타입인 경우
-			if (pValue->is_number()) {
-				processData = static_cast<uint32_t>(pValue->get<double>());
-				validData = true;
-				TRACE("SMC 숫자 데이터: %.0f (0x%08X)\n", pValue->get<double>(), processData);
-			}
-			// 문자열 타입인 경우 (16진수 처리)
-			else if (pValue->is_string()) {
-				std::string hexStr = pValue->get<std::string>();
-				TRACE("SMC 문자열 데이터: %s\n", hexStr.c_str());
-
-				// 16진수 문자열 변환 (8자리 또는 0x 접두사 처리)
-				if ((hexStr.length() == 8 && hexStr.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos) ||
-					(hexStr.length() == 10 && hexStr.substr(0, 2) == "0x")) {
-
-					const char* hexStart = (hexStr.substr(0, 2) == "0x") ? hexStr.c_str() + 2 : hexStr.c_str();
-					processData = static_cast<uint32_t>(strtoul(hexStart, nullptr, 16));
-					validData = true;
-					TRACE("16진수 문자열 변환: %s → 0x%08X (%u)\n", hexStr.c_str(), processData, processData);
-				}
-			}
-
-			if (validData) {
-				// SMC 스펙: Bit 16-31이 Flow measurement value (상위 16비트)
-				int16_t flowPD = static_cast<int16_t>((processData >> 16) & 0xFFFF);
-				processedValue = flowPD;
-
-				TRACE("SMC 32bit → 16bit 처리: 전체=0x%08X(%u) → 상위16bit(FlowPD)=%d\n",
-					processData, processData, flowPD);
-			}
+			TRACE("32bit → 16bit 처리: 전체=0x%08X(%u) → 상위16bit(FlowPD)=%d\n",
+				processData, processData, flowPD);
 		}
 
 		// 추출된 값의 타입과 내용 출력
@@ -362,17 +357,11 @@ bool CJsonParser::ApplyAnalogValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann
 		return false;
 	}
 
-	// SMC_PF3A703H Device일 때 IODD 변환 공식 적용 (이미 16bit 값이 들어옴)
-	CConfigManager& configManager = CConfigManager::GetInstance();
-	CString deviceType = configManager.GetDevice();
-
-	if (deviceType.CompareNoCase(_T("SMC_PF3A703H")) == 0) {
-		// IODD 스펙: FlowValue(L/min) = 0.75 × PD + 0
-		double originalPD = analogValue;
-		analogValue = 0.75 * analogValue + 0.0;
-		TRACE("SMC PF3A703H 변환 공식 적용: PD=%.0f → FlowValue=%.2f L/min\n",
-			originalPD, analogValue);
-	}
+	// 모든 데이터에 대해 1을 곱하는 변환 공식 적용
+	double originalValue = analogValue;
+	analogValue = 1.0 * analogValue + 0.0;
+	TRACE("데이터 변환 공식 적용: 원본=%.0f → 변환값=%.2f\n",
+		originalValue, analogValue);
 
 	int result = EV_PutSBAiValue(tagInfo.nStnPos, tagInfo.nTagPos, analogValue);
 	TRACE("AI/AO 태그 적용 결과: %d (값: %f)\n", result, analogValue);

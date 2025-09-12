@@ -24,6 +24,7 @@ public:
 
 	// 모든 태그 매핑 조회
 	std::map<CString, CString> GetAllTagMappings() const;
+	
 
 	// 태그 매핑 로드/저장
 	bool LoadTagMappings();
@@ -60,8 +61,12 @@ public:
 
 	void SetMqttKeepAlive(int keepAlive);
 	int GetMqttKeepAlive() const;
+	
+	// MQTT 구독 토픽 설정
+	void SetSubscribeTopic(const CString& topic);
+	CString GetSubscribeTopic() const;
 
-	// Device 설정 메서드
+	// Device 설정 메서드 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
 	void SetDevice(const CString& deviceType);
 	CString GetDevice() const;
 
@@ -72,9 +77,10 @@ private:
 	CString m_mqttIp;
 	int m_mqttPort;
 	int m_mqttKeepAlive;
+	CString m_subscribeTopic;	// 구독할 토픽 패턴
 	std::map<CString, CString> m_tagMappings;  // 태그명 -> JSONPath 매핑
 
-	// Device 타입
+	// Device 타입 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
 	CString m_device;
 
 	// 내부 헬퍼 메서드
