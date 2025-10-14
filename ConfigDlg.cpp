@@ -346,10 +346,6 @@ void CConfigDlg::OnLvnEndlabeleditListTagMapping(NMHDR* pNMHDR, LRESULT* pResult
 	*pResult = FALSE;  // 기본 처리 방지
 }
 
-// ===============================
-// 새로운 기능 구현
-// ===============================
-
 void CConfigDlg::AddNewTagRow()
 {
 	TRACE("AddNewTagRow 호출\n");

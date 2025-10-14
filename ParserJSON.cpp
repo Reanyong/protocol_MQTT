@@ -108,13 +108,13 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 
 		totalCount++;
 
-		// 토픽 필터링
-		if (configuredTopic != _T("+") && configuredTopic.CompareNoCase(mqttTopic) != 0) {
+		 // 전체 토픽 구독: 모든 토픽에서 데이터 처리
+		 if (configuredTopic != _T("+") && configuredTopic.CompareNoCase(mqttTopic) != 0) {
 			TRACE("토픽 불일치로 건너뜀: 태그=%S, 설정토픽=%S, 수신토픽=%S\n",
 				(LPCTSTR)tagName, (LPCTSTR)configuredTopic, (LPCTSTR)mqttTopic);
 			skippedCount++;
 			continue;
-		}
+		 }
 
 		TRACE("\n--- 태그 처리 ---\n");
 		TRACE("태그명: %S\n", (LPCTSTR)tagName);
