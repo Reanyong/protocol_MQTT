@@ -83,6 +83,11 @@ bool CConfigManager::LoadConfig()
 
 		result = result && LoadTagMappings();
 
+		// ===== HashMap 구축 (성능 최적화) =====
+		if (result) {
+			BuildTopicHashMap();
+		}
+
 		return result;
 	}
 	catch (const std::exception& e) {
@@ -571,4 +576,68 @@ void CConfigManager::SetAutorun(int autorun)
 int CConfigManager::GetAutorun() const
 {
 	return m_autorun;
+}
+
+// ===== Map 기반 빠른 조회 구현 (성능 최적화) =====
+
+void CConfigManager::BuildTopicHashMap()
+{
+	TRACE("=== Topic Map 구축 시작 ===\n");
+	DWORD startTime = GetTickCount();
+
+	m_topicToTagMap.clear();
+	// std::map은 reserve 없음 (Red-Black Tree 구조)
+
+	int successCount = 0;
+	int wildcardCount = 0;
+
+	for (const auto& mapping : m_tagMappings) {
+		const CString& tagName = mapping.first;
+		const CString& tagMapping = mapping.second;
+
+		// 토픽과 JSONPath 분리
+		CString topic, jsonPath;
+		int commaPos = tagMapping.Find(_T(","));
+		
+		if (commaPos > 0) {
+			topic = tagMapping.Left(commaPos);
+			jsonPath = tagMapping.Mid(commaPos + 1);
+			topic.Trim();
+			jsonPath.Trim();
+		}
+		else {
+			// 콤마가 없으면 전체가 JSONPath (와일드카드 토픽)
+			topic = _T("+");
+			jsonPath = tagMapping;
+			jsonPath.Trim();
+			wildcardCount++;
+		}
+
+		// HashMap에 추가
+		if (topic != _T("+")) {
+			m_topicToTagMap[topic] = TagMappingInfo(tagName, jsonPath);
+			successCount++;
+		}
+	}
+
+	DWORD elapsed = GetTickCount() - startTime;
+
+	TRACE("=== Topic Map 구축 완료 ===\n");
+	TRACE("성공: %d개, 와일드카드: %d개, 전체: %d개\n",
+		successCount, wildcardCount, m_tagMappings.size());
+	TRACE("Map 크기: %d entries\n", m_topicToTagMap.size());
+	TRACE("구축 시간: %d ms\n", elapsed);
+	TRACE("검색 성능: O(log N) - 201개 기준 약 8번 비교\n");
+}
+
+bool CConfigManager::GetTagByTopic(const CString& topic, TagMappingInfo& outInfo) const
+{
+	// O(log N) 검색 (Red-Black Tree)
+	// 201개 기준: log2(201) ≈ 7.65 → 약 8번 비교
+	auto it = m_topicToTagMap.find(topic);
+	if (it != m_topicToTagMap.end()) {
+		outInfo = it->second;
+		return true;
+	}
+	return false;
 }

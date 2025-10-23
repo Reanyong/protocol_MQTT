@@ -1,6 +1,16 @@
 ﻿#pragma once
 #include <map>
 
+// 태그 매핑 정보 구조체
+struct TagMappingInfo {
+	CString tagName;
+	CString jsonPath;
+	
+	TagMappingInfo() {}
+	TagMappingInfo(const CString& name, const CString& path)
+		: tagName(name), jsonPath(path) {}
+};
+
 class CConfigManager
 {
 public:
@@ -25,6 +35,10 @@ public:
 	// 모든 태그 매핑 조회
 	std::map<CString, CString> GetAllTagMappings() const;
 	
+	// ===== Map 기반 빠른 조회 (성능 최적화) =====
+	// Topic → TagMappingInfo 매핑 (O(log N) 검색, 201개 → 약 8번 비교)
+	bool GetTagByTopic(const CString& topic, TagMappingInfo& outInfo) const;
+	void BuildTopicHashMap();  // Map 구축 (LoadConfig 시 자동 호출)
 
 	// 태그 매핑 로드/저장
 	bool LoadTagMappings();
@@ -83,6 +97,11 @@ private:
 	int m_mqttKeepAlive;
 	CString m_subscribeTopic;	// 구독할 토픽 패턴
 	std::map<CString, CString> m_tagMappings;  // 태그명 -> JSONPath 매핑
+
+	// ===== 성능 최적화: Topic → TagMappingInfo Map =====
+	// O(201) 순회 → O(log N) 검색으로 개선 (std::map 사용)
+	// CString은 기본 해시 함수가 없어서 std::map 사용
+	std::map<CString, TagMappingInfo> m_topicToTagMap;
 
 	// Device 타입 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
 	CString m_device;

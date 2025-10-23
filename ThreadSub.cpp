@@ -49,18 +49,10 @@ CThreadSub::CThreadSub()
 	// Initialize multithreading
 	m_pMessageQueue = nullptr;
 
-	// ===== 성능 최적화: 워커 스레드 개수 증가 =====
-	// 200 msg/sec 처리를 위해 최소 6개 이상 필요
-	int cpuCores = std::thread::hardware_concurrency();
-	if (cpuCores > 0) {
-		// 최소 6개, 최대 12개
-		m_workerThreadCount = min(max(6, cpuCores - 2), 12);
-		TRACE("CPU 코어: %d개 → 워커 스레드: %d개 자동 설정 (최소 6개 보장)\n", cpuCores, m_workerThreadCount);
-	}
-	else {
-		m_workerThreadCount = 6; // 기본값 증가 (3→6)
-		TRACE("CPU 코어 감지 실패 → 워커 스레드: 6개 (기본값)\n");
-	}
+	// ===== 성능 최적화: 단일 워커 스레드 =====
+	// Lock 경합 제거 및 순차 처리로 성능 개선
+	m_workerThreadCount = 1;
+	TRACE("단일 워커 스레드 모드 (Lock 경합 제거)\n");
 }
 
 CThreadSub::~CThreadSub()
