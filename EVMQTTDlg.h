@@ -90,9 +90,19 @@ protected:
 	// 활동 로그 관련 함수
 	afx_msg LRESULT OnUpdateActivityLog(WPARAM wParam, LPARAM lParam);
 
+	// 스레드 자동 종료 통지 함수
+	afx_msg LRESULT OnThreadAutoTerminated(WPARAM wParam, LPARAM lParam);
+
 	// EasyView 엔진 종료 감지 관련
 	afx_msg LRESULT OnEasyViewStop(WPARAM wParam, LPARAM lParam);
 	virtual LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam);
+
+	// 시스템 트레이 관련
+	afx_msg LRESULT OnTrayNotification(WPARAM wParam, LPARAM lParam);
+	void CreateTrayIcon();
+	void RemoveTrayIcon();
+	void ShowTrayMenu();
+
 	DECLARE_MESSAGE_MAP()
 
 public:
@@ -100,6 +110,7 @@ public:
 	afx_msg void OnBnClickedBtnConfig();
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnBnClickedCancel();
+	afx_msg void OnClose();
 
 	// 새로운 UI 컨트롤들
 	CStatic m_staticMqttStatus;      // MQTT 브로커 상태
@@ -145,6 +156,10 @@ private:
 	// EasyView 엔진 종료 감지 관련
 	static UINT m_wm_EVViewStop;     // EasyView 엔진 종료 메시지 ID
 	BOOL m_bEngineExit;              // 엔진 종료 플래그
+
+	// 시스템 트레이 관련
+	NOTIFYICONDATA m_nid;            // 트레이 아이콘 데이터
+	bool m_bTrayIconCreated;         // 트레이 아이콘 생성 여부
 
 	// 내부 헬퍼 함수들
 	void UpdateActivityList();

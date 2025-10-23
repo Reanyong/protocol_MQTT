@@ -12,6 +12,7 @@
 CLAUDE.md
 .claude/*.json
 /test
+nul
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

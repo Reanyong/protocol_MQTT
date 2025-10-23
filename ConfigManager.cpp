@@ -10,6 +10,7 @@ CConfigManager::CConfigManager()
 	, m_mqttKeepAlive(60)         // 기본 keepalive
 	, m_subscribeTopic(_T("+"))   // 기본값 모든 토픽
 	, m_device(_T(""))
+	, m_autorun(0)                // 기본값 0 (자동 시작 안함)
 {
 	// INI 파일 경로 설정 (실행 파일과 같은 경로에 저장)
 	m_iniFilePath = GetIniFilePath();
@@ -77,6 +78,9 @@ bool CConfigManager::LoadConfig()
 		m_mqttPort = GetPrivateProfileInt(_T("General"), _T("Port"), 1883, m_iniFilePath);
 		m_mqttKeepAlive = GetPrivateProfileInt(_T("General"), _T("KeepAlive"), 60, m_iniFilePath);
 
+		// Autorun 설정 로드 (기본값 0)
+		m_autorun = GetPrivateProfileInt(_T("General"), _T("Autorun"), 0, m_iniFilePath);
+
 		result = result && LoadTagMappings();
 
 		return result;
@@ -117,6 +121,11 @@ bool CConfigManager::SaveConfig()
 
 		// MQTT 구독 토픽 저장
 		WritePrivateProfileString(_T("General"), _T("SubscribeTopic"), m_subscribeTopic, m_iniFilePath);
+
+		// Autorun 설정 저장
+		CString strAutorun;
+		strAutorun.Format(_T("%d"), m_autorun);
+		WritePrivateProfileString(_T("General"), _T("Autorun"), strAutorun, m_iniFilePath);
 
 		result = result && SaveTagMappings();
 
@@ -550,4 +559,16 @@ void CConfigManager::SetSubscribeTopic(const CString& topic)
 CString CConfigManager::GetSubscribeTopic() const
 {
 	return m_subscribeTopic;
+}
+
+// Autorun 관련 메서드
+void CConfigManager::SetAutorun(int autorun)
+{
+	m_autorun = autorun;
+	TRACE("Autorun 설정: %d\n", autorun);
+}
+
+int CConfigManager::GetAutorun() const
+{
+	return m_autorun;
 }

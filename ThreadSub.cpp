@@ -9,6 +9,8 @@
 #include "JsonResultManager.h"
 #include "MqttWorkerThread.h"
 #include "LogManager.h"
+#include "TagInfoCache.h"        // Phase 1: 태그 캐시 추가
+#include "JsonPathTokenCache.h"  // Phase 2: JSONPath 토큰 캐시 추가
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -46,7 +48,19 @@ CThreadSub::CThreadSub()
 
 	// Initialize multithreading
 	m_pMessageQueue = nullptr;
-	m_workerThreadCount = 3;
+
+	// ===== 성능 최적화: 워커 스레드 개수 증가 =====
+	// 200 msg/sec 처리를 위해 최소 6개 이상 필요
+	int cpuCores = std::thread::hardware_concurrency();
+	if (cpuCores > 0) {
+		// 최소 6개, 최대 12개
+		m_workerThreadCount = min(max(6, cpuCores - 2), 12);
+		TRACE("CPU 코어: %d개 → 워커 스레드: %d개 자동 설정 (최소 6개 보장)\n", cpuCores, m_workerThreadCount);
+	}
+	else {
+		m_workerThreadCount = 6; // 기본값 증가 (3→6)
+		TRACE("CPU 코어 감지 실패 → 워커 스레드: 6개 (기본값)\n");
+	}
 }
 
 CThreadSub::~CThreadSub()
@@ -101,6 +115,7 @@ END_MESSAGE_MAP()
 // CThreadSub message handlers
 
 #include <mosquitto.h>
+#include <thread>  // std::thread::hardware_concurrency()
 #pragma comment(lib, ".\\Lib\\mosquitto.lib")
 
 #define strdup _strdup
@@ -296,6 +311,35 @@ int CThreadSub::Run()
 	CConfigManager& configManager = CConfigManager::GetInstance();
 	configManager.LoadConfig();
 
+	// ===== Phase 1: TagInfoCache 초기화 (핵심!) =====
+	TRACE("=== Phase 1: TagInfoCache PreloadAllTags Starting ===\n");
+	DWORD cacheLoadStartTime = GetTickCount();
+
+	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
+	g_tagCache.PreloadAllTags(tagMappings);
+
+	DWORD cacheLoadTime = GetTickCount() - cacheLoadStartTime;
+	TRACE("=== Phase 1: TagInfoCache PreloadAllTags Completed in %d ms ===\n", cacheLoadTime);
+
+	// ===== Phase 2: JSONPath 토큰 캐시 초기화 (핵심!) =====
+	TRACE("=== Phase 2: JsonPathTokenCache PreloadAllJsonPaths Starting ===\n");
+	DWORD jsonPathCacheStartTime = GetTickCount();
+
+	g_jsonPathCache.PreloadAllJsonPaths(tagMappings);
+
+	DWORD jsonPathCacheLoadTime = GetTickCount() - jsonPathCacheStartTime;
+	TRACE("=== Phase 2: JsonPathTokenCache PreloadAllJsonPaths Completed in %d ms ===\n", jsonPathCacheLoadTime);
+
+	// UI에 캐시 로딩 완료 알림 (Phase 1 + Phase 2 통합)
+	if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+	{
+		CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+		CString cacheMsg;
+		cacheMsg.Format(_T("캐시 로딩 완료: 태그 %d개 (%dms), JSONPath (%dms)"),
+			tagMappings.size(), cacheLoadTime, jsonPathCacheLoadTime);
+		pDlg->AddActivityLog(_T("시스템"), cacheMsg, ActivityLogItem::LOG_INFO, _T("준비"));
+	}
+
 	CString mqttIp = configManager.GetMqttIp();
 	int mqttPort = configManager.GetMqttPort();
 	int mqttKeepAlive = configManager.GetMqttKeepAlive();
@@ -372,44 +416,123 @@ int CThreadSub::Run()
 		TRACE("MQTT subscription request failed: %d\n", subscribe_result);
 	}
 
+	// ===== 재연결 관리 변수 =====
+	int reconnectAttempts = 0;           // 현재 재연결 시도 횟수
+	const int MAX_RECONNECT_ATTEMPTS = 3; // 최대 재연결 시도 횟수
+	bool connectionLost = false;         // 연결 끊김 상태
+	DWORD lastReconnectTime = 0;         // 마지막 재연결 시도 시간
+
 	// 메인 루프
 	TRACE("Main loop started\n");
 	while (!m_bEndThread)
 	{
 		dwCur = GetTickCount();
 
-		// MQTT 메시지 처리 (논블로킹) - 타임아웃 최적화
 		nNetworkLoop = mosquitto_loop(mosq, 10, 1);
 		if (nNetworkLoop != MOSQ_ERR_SUCCESS) {
 			TRACE("mosquitto_loop error: %d\n", nNetworkLoop);
 
-			// UI에 연결 끊김 알림
-			if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
-			{
-				CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-				pDlg->OnMqttConnectionChanged(false);
-			}
+			// 연결이 끊겼음을 감지
+			if (!connectionLost) {
+				connectionLost = true;
+				reconnectAttempts = 0;
+				lastReconnectTime = dwCur;
 
-			Sleep(100);
-
-			// 재연결 시도
-			if (mosquitto_reconnect(mosq) == MOSQ_ERR_SUCCESS) {
-				TRACE("MQTT reconnection successful\n");
-				
-				// UI에 재연결 성공 알림
+				// UI에 연결 끊김 알림
 				if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
 				{
 					CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-					pDlg->OnMqttConnectionChanged(true);
+					pDlg->OnMqttConnectionChanged(false);
+					pDlg->AddActivityLog(_T("MQTT"), _T("연결 끊김"), ActivityLogItem::LOG_ERROR, _T("재연결 시도 중"));
 				}
-				
-				// 재연결 후 다시 구독
-				int subscribe_result = mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
-				if (subscribe_result == MOSQ_ERR_SUCCESS) {
-					TRACE("MQTT re-subscription successful: %s\n", mqtt_topic);
-				} else {
-					TRACE("MQTT re-subscription failed: %d (topic: %s)\n", subscribe_result, mqtt_topic);
+
+				TRACE("=== MQTT Connection Lost - Starting reconnection attempts ===\n");
+			}
+
+			// 최대 재연결 횟수 초과 시 종료
+			if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+				TRACE("=== Maximum reconnection attempts (%d) reached. Terminating thread. ===\n",
+					MAX_RECONNECT_ATTEMPTS);
+
+				// UI에 재연결 실패 최종 알림
+				if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+				{
+					CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+					CString failMsg;
+					failMsg.Format(_T("%d회 재연결 실패"), MAX_RECONNECT_ATTEMPTS);
+					pDlg->AddActivityLog(_T("MQTT"), failMsg, ActivityLogItem::LOG_ERROR, _T("통신 종료"));
+
+					// UI 상태 동기화를 위한 메시지 전송 (WM_USER + 103)
+					TRACE("UI 상태 동기화 메시지 전송 (WM_USER + 103)\n");
+					::PostMessage(m_pOwner->GetSafeHwnd(), WM_USER + 103, 0, 0);
 				}
+
+				// 로그 기록
+				CLogManager& logManager = CLogManager::GetInstance();
+				CString errorMsg;
+				errorMsg.Format(_T("최대 재연결 시도 횟수(%d회) 초과"), MAX_RECONNECT_ATTEMPTS);
+				logManager.WriteErrorLog(_T("MQTT통신종료"), _T("재연결실패"), errorMsg,
+					CString(mqtt_host) + _T(":") + CString(std::to_string(mqtt_port).c_str()));
+
+				// 스레드 종료 플래그 설정
+				m_bEndThread = TRUE;
+				break;
+			}
+
+			// 재연결 시도 간격 조절 (5초마다)
+			if (dwCur - lastReconnectTime > 5000) {
+				reconnectAttempts++;
+				lastReconnectTime = dwCur;
+
+				TRACE("=== Reconnection attempt %d/%d ===\n",
+					reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
+
+				// UI에 재연결 시도 알림
+				if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+				{
+					CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+					CString retryMsg;
+					retryMsg.Format(_T("재연결 시도 %d/%d"), reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
+					pDlg->AddActivityLog(_T("MQTT"), retryMsg, ActivityLogItem::LOG_CONNECTION, _T("시도중"));
+				}
+
+				// 재연결 시도
+				if (mosquitto_reconnect(mosq) == MOSQ_ERR_SUCCESS) {
+					TRACE("MQTT reconnection successful on attempt %d\n", reconnectAttempts);
+
+					// 연결 복구 성공
+					connectionLost = false;
+					reconnectAttempts = 0;
+
+					// UI에 재연결 성공 알림
+					if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+					{
+						CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+						pDlg->OnMqttConnectionChanged(true);
+						pDlg->AddActivityLog(_T("MQTT"), _T("재연결 성공"), ActivityLogItem::LOG_CONNECTION, _T("성공"));
+					}
+
+					// 재연결 후 다시 구독
+					int subscribe_result = mosquitto_subscribe(mosq, NULL, mqtt_topic, 0);
+					if (subscribe_result == MOSQ_ERR_SUCCESS) {
+						TRACE("MQTT re-subscription successful: %s\n", mqtt_topic);
+					} else {
+						TRACE("MQTT re-subscription failed: %d (topic: %s)\n", subscribe_result, mqtt_topic);
+					}
+				}
+				else {
+					TRACE("Reconnection attempt %d failed\n", reconnectAttempts);
+				}
+			}
+
+			Sleep(100);  // 연결 끊김 상태에서는 100ms 대기
+		}
+		else {
+			// 정상 연결 상태: 재연결 카운터 초기화
+			if (connectionLost) {
+				connectionLost = false;
+				reconnectAttempts = 0;
+				TRACE("Connection restored, reset reconnect counter\n");
 			}
 		}
 
@@ -443,10 +566,28 @@ int CThreadSub::Run()
 
 			// 워커 스레드 상태 출력
 			PrintThreadStatus();
+
+			// ===== Phase 1: 캐시 통계 출력 (성능 측정) =====
+			CTagInfoCache::CacheStats cacheStats;
+			g_tagCache.GetCacheStats(cacheStats);
+			TRACE("=== Phase 1: TagInfoCache Stats ===\n");
+			TRACE("Cache Hit Rate: %.2f%% (%d hits / %d total)\n",
+				cacheStats.hitRate, cacheStats.hitCount,
+				cacheStats.hitCount + cacheStats.missCount);
+			TRACE("Cache Size: %d entries\n", cacheStats.totalSize);
+
+			// ===== Phase 2: JSONPath 캐시 통계 출력 =====
+			CJsonPathTokenCache::CacheStats pathCacheStats;
+			g_jsonPathCache.GetCacheStats(pathCacheStats);
+			TRACE("=== Phase 2: JsonPathTokenCache Stats ===\n");
+			TRACE("Cache Hit Rate: %.2f%% (%d hits / %d total)\n",
+				pathCacheStats.hitRate, pathCacheStats.hitCount,
+				pathCacheStats.hitCount + pathCacheStats.missCount);
+			TRACE("Cache Size: %d entries\n", pathCacheStats.totalSize);
 		}
 
-		// CPU 사용률 조절 - MQTT 루프 타임아웃과 조화
-		Sleep(5);
+		// CPU 사용률 조절 - 최적화: Sleep 5→1ms (더 빠른 반응)
+		Sleep(10);
 	}
 
 	// 정리 작업
@@ -505,8 +646,8 @@ void CThreadSub::CreateWorkerThreads()
 				pWorker->SetMessageQueue(m_pMessageQueue);
 				pWorker->SetOwner(m_pOwner);
 				pWorker->SetWorkerID(i + 1);
-				pWorker->SetBatchSize(30);
-				pWorker->SetBatchTimeout(100);
+				pWorker->SetBatchSize(20);   // 최적화: 30→20
+				pWorker->SetBatchTimeout(20); // 최적화: 100→20ms
 
 				// AddRef() 제거 - 일반 포인터이므로 불필요
 				// m_pMessageQueue->AddRef();  // 이 줄 제거
@@ -588,7 +729,7 @@ void CThreadSub::CreateWorkerThreads()
 		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
 		{
 			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-			pDlg->AddActivityLog(_T("시스템"), _T("워커 스레드 생성 실패"), ActivityLogItem::LOG_ERROR, _T("실패"));
+			pDlg->AddActivityLog(_T("시스템"), _T("Worker Thread 생성 실패"), ActivityLogItem::LOG_ERROR, _T("실패"));
 		}
 	}
 	else if (m_workerThreads.size() < m_workerThreadCount / 2) {
@@ -600,7 +741,7 @@ void CThreadSub::CreateWorkerThreads()
 		{
 			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
 			CString warningMsg;
-			warningMsg.Format(_T("워커 %d/%d개만 생성됨"), m_workerThreads.size(), m_workerThreadCount);
+			warningMsg.Format(_T("Worker Thread %d/%d개만 생성됨"), m_workerThreads.size(), m_workerThreadCount);
 			pDlg->AddActivityLog(_T("시스템"), warningMsg, ActivityLogItem::LOG_ERROR, _T("경고"));
 		}
 	}
@@ -613,7 +754,7 @@ void CThreadSub::CreateWorkerThreads()
 		{
 			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
 			CString successMsg;
-			successMsg.Format(_T("워커 %d개 생성 완료"), m_workerThreads.size());
+			successMsg.Format(_T("Worker Thread % d개 생성 완료"), m_workerThreads.size());
 			pDlg->AddActivityLog(_T("시스템"), successMsg, ActivityLogItem::LOG_INFO, _T("성공"));
 		}
 	}

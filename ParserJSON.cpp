@@ -3,6 +3,8 @@
 #include "ConfigManager.h"
 #include "JsonPathUtil.h"
 #include "LogManager.h"
+#include "TagInfoCache.h"        // Phase 1: 태그 캐시 추가
+#include "JsonPathTokenCache.h"  // Phase 2: JSONPath 토큰 캐시 추가
 #include <sstream>
 #include <string>
 
@@ -73,9 +75,9 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
 	CString deviceType = configManager.GetDevice();
 
-	TRACE("=== MQTT 토픽별 태그 매핑 적용 시작 ===\n");
-	TRACE("받은 MQTT 토픽: %S\n", (LPCTSTR)mqttTopic);
-	TRACE("데이터 처리: 모든 데이터에 1 곱하기 적용 (Device 설정 무시)\n");
+	//TRACE("=== MQTT 토픽별 태그 매핑 적용 시작 ===\n");
+	//TRACE("받은 MQTT 토픽: %S\n", (LPCTSTR)mqttTopic);
+	//TRACE("데이터 처리: 모든 데이터에 1 곱하기 적용 (Device 설정 무시)\n");
 
 	if (tagMappings.empty()) {
 		TRACE("태그 매핑이 비어있습니다.\n");
@@ -151,6 +153,14 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 
 bool CJsonParser::ApplyValueToTagOptimized(const CString& tagName, const CString& jsonPath) const
 {
+	// ===== 새로운 Raw HEX 모드 =====
+	// HEX 원본 데이터를 ScanBuffer에 직접 쓰기
+	// 모든 IODD 장비 대응 (EasyView 태그 속성에 따라 자동 해석)
+	TRACE("ApplyValueToTagOptimized: Raw HEX 모드로 처리\n");
+	return ApplyRawHexToScanBuffer(tagName, jsonPath);
+
+	// ===== 기존 코드 (주석 처리 - 필요시 복원 가능) =====
+	/*
 	try {
 		// JSONPath로 원시 JSON 값 추출
 		std::vector<std::string> pathTokens = CJsonPathUtil::ParseJsonPath(jsonPath);
@@ -266,6 +276,7 @@ bool CJsonParser::ApplyValueToTagOptimized(const CString& tagName, const CString
 		TRACE("태그 값 설정 중 예외 발생: %s\n", e.what());
 		return false;
 	}
+	*/
 }
 
 bool CJsonParser::ApplyDigitalValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const
@@ -421,4 +432,272 @@ bool CJsonParser::GetValueByPath(const CString& jsonPath, double& outValue) cons
 		return false;
 	}
 	return CJsonPathUtil::ExtractValue(m_jsonData, jsonPath, outValue);
+}
+
+// ============================================================================
+// Raw HEX 데이터를 ScanBuffer에 직접 쓰기 (모든 IODD 장비 대응)
+// ============================================================================
+
+// EasyView API 선언
+//extern "C" int APIENTRY EV_PutSBBuffer(int nStnPos, int nWordOffset, short *pSrcSb, int nBuffCnt);
+//extern "C" ST_EV_TAG_ANALOG_INPUT* APIENTRY EV_GetAiTagInfo(int nStnPos, int nTagPos, int *ErrorCode);
+//extern "C" ST_EV_TAG_DIGITAL_INPUT* APIENTRY EV_GetDiTagInfo(int nStnPos, int nTagPos, int *ErrorCode);
+//extern "C" ST_EV_TAG_STRING_INPUT* APIENTRY EV_GetSiTagInfo(int nStnPos, int nTagPos, int *ErrorCode);
+
+bool CJsonParser::ApplyRawHexToScanBuffer(const CString& tagName, const CString& jsonPath) const
+{
+	try {
+		// ===== Phase 1+2: 성능 측정 시작 =====
+		// DWORD cacheStartTime = GetTickCount();  // 성능 최적화: 측정 제거
+
+		// ===== Phase 2: JSONPath 토큰 캐시 조회 (핵심 최적화!) =====
+		std::vector<std::string> pathTokens;
+		bool pathCacheHit = g_jsonPathCache.GetCachedTokens(jsonPath, pathTokens);
+
+		if (!pathCacheHit) {
+			// 캐시 미스: 직접 파싱 (fallback)
+			// TRACE("[JSONPath CACHE MISS] %S - parsing manually\n", (LPCTSTR)jsonPath);
+			pathTokens = CJsonPathUtil::ParseJsonPath(jsonPath);
+		}
+
+		if (pathTokens.empty()) {
+			// TRACE("JSONPath 파싱 실패: %S\n", (LPCTSTR)jsonPath);
+			return false;
+		}
+
+		const nlohmann::json* pValue = CJsonPathUtil::NavigateToValue(m_jsonData, pathTokens);
+		if (!pValue) {
+			// TRACE("JSONPath로 값을 찾을 수 없음: %S\n", (LPCTSTR)jsonPath);  // 성능 최적화
+			return false;
+		}
+
+		// ===== JSON 객체인 경우: code 체크 후 data 추출 =====
+		std::string hexStr;
+		if (pValue->is_object()) {
+			// { "code": 200, "data": "000100" } 형식 처리
+			if (pValue->contains("code")) {
+				int code = (*pValue)["code"].get<int>();
+				if (code != 200) {
+					// 에러 코드 - 스킵 (503 등)
+					// TRACE("JSONPath 응답 에러: code=%d (태그: %S)\n", code, (LPCTSTR)tagName);  // 성능 최적화
+					return false;
+				}
+			}
+
+			// data 필드 추출
+			if (pValue->contains("data")) {
+				const auto& dataValue = (*pValue)["data"];
+				if (dataValue.is_string()) {
+					hexStr = dataValue.get<std::string>();
+				} else if (dataValue.is_number()) {
+					// 숫자를 16진수 문자열로 변환
+					char hexBuf[32];
+					sprintf_s(hexBuf, "%X", dataValue.get<int>());
+					hexStr = hexBuf;
+					TRACE("숫자 데이터를 HEX로 변환: %d → %s\n", dataValue.get<int>(), hexStr.c_str());
+				} else {
+					TRACE("data 필드가 문자열/숫자가 아님\n");
+					return false;
+				}
+			} else {
+				TRACE("JSON 객체에 data 필드가 없음\n");
+				return false;
+			}
+		}
+		// ===== 문자열인 경우: 바로 사용 =====
+		else if (pValue->is_string()) {
+			hexStr = pValue->get<std::string>();
+		}
+		// ===== 그 외: 처리 불가 =====
+		else {
+			TRACE("JSONPath 값이 객체도 문자열도 아님: %S\n", (LPCTSTR)jsonPath);
+			return false;
+		}
+
+		// HEX 검증 (16진수 문자만 포함)
+		if (hexStr.find_first_not_of("0123456789ABCDEFabcdef") != std::string::npos) {
+			TRACE("유효하지 않은 HEX 문자열: %s\n", hexStr.c_str());
+			return false;
+		}
+
+		// HEX → Word 배열 변환
+		std::vector<short> wordArray;
+		if (!ConvertHexToWordArray(hexStr, wordArray)) {
+			TRACE("HEX → Word 변환 실패\n");
+			return false;
+		}
+
+		// ===== Phase 1: 캐시에서 태그 정보 조회 (핵심 최적화!) =====
+		// TRACE("[DEBUG] 캐시 조회 시도: 태그명 = '%S'\n", (LPCTSTR)tagName);  // 성능 최적화
+
+		CTagInfoCache::TagCacheEntry cacheEntry;
+		bool cacheHit = g_tagCache.GetCachedTagInfo(tagName, cacheEntry);
+
+		// TRACE("[DEBUG] 캐시 조회 결과: %s\n", cacheHit ? "HIT" : "MISS");  // 성능 최적화
+
+		// DWORD cacheElapsed = GetTickCount() - cacheStartTime;  // 성능 최적화: 측정 제거
+
+		int nStnPos, nTagPos, nSBOffset, nTagType;
+
+		if (cacheHit) {
+			// 캐시 히트: 즉시 사용 (매우 빠름 ~1ms)
+			nStnPos = cacheEntry.nStnPos;
+			nTagPos = cacheEntry.nTagPos;
+			nSBOffset = cacheEntry.nSBOffset;
+			nTagType = cacheEntry.nTagType;
+
+			// ===== 성능 최적화: 통계 출력 완전 제거 =====
+			// static int hitMsgCount = 0;
+			// if (++hitMsgCount % 1000 == 0) {
+			//	TRACE("[CACHE HIT #%d] Tag: %S, SBOffset=%d, Time=%dms\n",
+			//		hitMsgCount, (LPCTSTR)tagName, nSBOffset, cacheElapsed);
+			// }
+		}
+		else {
+			// 캐시 미스: 기존 API 호출 방식 (느림 ~10-50ms)
+			// TRACE("[CACHE MISS] Tag: %S - Using legacy API calls\n", (LPCTSTR)tagName);  // 성능 최적화
+
+			ST_EV_TAG_INFO tagInfo;
+			int tagResult = EV_GetTagInfo(tagName, &tagInfo);
+			if (tagResult <= 0) {
+				TRACE("태그를 찾을 수 없음: %S (결과: %d)\n", (LPCTSTR)tagName, tagResult);
+				return false;
+			}
+
+			nStnPos = tagInfo.nStnPos;
+			nTagPos = tagInfo.nTagPos;
+			nTagType = tagInfo.nTagType;
+			nSBOffset = tagInfo.nTagPos;  // 기본값
+
+			// 타입별 SBOffset 조회 (기존 코드 유지)
+			int errorCode = 0;
+			switch (nTagType) {
+			case TYPE_AI:
+			case TYPE_AO:
+			{
+				ST_EV_TAG_ANALOG_INPUT* pAiTag = EV_GetAiTagInfo(nStnPos, nTagPos, &errorCode);
+				if (pAiTag != nullptr && errorCode != 0) {
+					if (pAiTag->nSBOffset >= 0 && pAiTag->nSBOffset < 10000) {
+						nSBOffset = pAiTag->nSBOffset;
+					}
+				}
+				break;
+			}
+			case TYPE_DI:
+			case TYPE_DO:
+			{
+				ST_EV_TAG_DIGITAL_INPUT* pDiTag = EV_GetDiTagInfo(nStnPos, nTagPos, &errorCode);
+				if (pDiTag != nullptr && errorCode == 0) {
+					if (pDiTag->nSBOffset >= 0 && pDiTag->nSBOffset < 10000) {
+						nSBOffset = pDiTag->nSBOffset;
+					}
+				}
+				break;
+			}
+			case TYPE_SI:
+			{
+				ST_EV_TAG_STRING_INPUT* pSiTag = EV_GetSiTagInfo(nStnPos, nTagPos, &errorCode);
+				if (pSiTag != nullptr && errorCode == 0) {
+					if (pSiTag->nSBOffset >= 0 && pSiTag->nSBOffset < 10000) {
+						nSBOffset = pSiTag->nSBOffset;
+					}
+				}
+				break;
+			}
+			}
+
+			//TRACE("[CACHE MISS] Final SBOffset=%d, Total time=%dms\n", nSBOffset, cacheElapsed);
+		}
+
+		// ===== ScanBuffer에 직접 쓰기 =====
+		int result = EV_PutSBBuffer(
+			nStnPos,                               // Station Position
+			nSBOffset,                             // Word Offset
+			wordArray.data(),                      // 소스 데이터
+			static_cast<int>(wordArray.size())     // Word 개수
+		);
+
+		if (result > 0) {
+			// ===== 성능 최적화: 성공 로그 완전 제거 =====
+			// static int successCount = 0;
+			// if (++successCount % 1000 == 0) {
+			//	TRACE("[SUCCESS #%d] Station[%d] SB[%d] ← %d Words (Cache time=%dms)\n",
+			//		successCount, nStnPos, nSBOffset, wordArray.size(), cacheElapsed);
+			// }
+			return true;
+		}
+		else {
+			TRACE("ScanBuffer 쓰기 실패: result=%d\n", result);
+
+			// 에러 로그 기록
+			CLogManager& logManager = CLogManager::GetInstance();
+			CString errorMsg;
+			errorMsg.Format(_T("ScanBuffer 쓰기 실패: Station=%d, SBOffset=%d, Words=%d, Result=%d"),
+				nStnPos, nSBOffset, wordArray.size(), result);
+			logManager.WriteErrorLog(_T("SB 쓰기실패"), tagName, errorMsg, CString(hexStr.c_str()));
+
+			return false;
+		}
+	}
+	catch (const std::exception& e) {
+		TRACE("Raw HEX 처리 중 예외 발생: %s\n", e.what());
+		return false;
+	}
+}
+
+bool CJsonParser::ConvertHexToWordArray(const std::string& hexStr, std::vector<short>& wordArray) const
+{
+	wordArray.clear();
+
+	// HEX 문자열 길이가 짝수여야 함
+	if (hexStr.length() % 2 != 0) {
+		TRACE("HEX 문자열 길이가 홀수: %d\n", hexStr.length());
+		return false;
+	}
+
+	size_t byteCount = hexStr.length() / 2;
+
+	// ===== 성능 최적화: 문자열 할당 제거, 직접 파싱 =====
+	// Byte 단위로 변환 후 Word로 조합 - IO-Link 데이터는 보통 Big Endian
+
+	// Inline HEX 문자 → 숫자 변환 함수 (매우 빠름!)
+	auto hexCharToInt = [](char c) -> int {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		return 0;
+	};
+
+	for (size_t i = 0; i < byteCount; i += 2) {
+		if (i + 1 < byteCount) {
+			// 2 bytes → 1 word (Big Endian)
+			// 직접 HEX 문자 파싱 (substr, strtoul 제거!)
+			size_t idx1 = i * 2;
+			size_t idx2 = i * 2 + 2;
+
+			unsigned char byte1 = (hexCharToInt(hexStr[idx1]) << 4) | hexCharToInt(hexStr[idx1 + 1]);
+			unsigned char byte2 = (hexCharToInt(hexStr[idx2]) << 4) | hexCharToInt(hexStr[idx2 + 1]);
+
+			// Big Endian: [High Byte][Low Byte]
+			short wordValue = (byte1 << 8) | byte2;
+			wordArray.push_back(wordValue);
+
+			// TRACE 제거 (Release에서는 무시되지만 일관성을 위해)
+			// TRACE("  Byte[%d-%d]: 0x%02X%02X → Word: 0x%04X (%d)\n",
+			//       i, i+1, byte1, byte2, (unsigned short)wordValue, wordValue);
+		}
+		else {
+			// 마지막 바이트가 홀수개인 경우 (패딩)
+			size_t idx = i * 2;
+			unsigned char byte1 = (hexCharToInt(hexStr[idx]) << 4) | hexCharToInt(hexStr[idx + 1]);
+			short wordValue = byte1 << 8;  // 상위 바이트에 배치
+			wordArray.push_back(wordValue);
+
+			// TRACE("  Byte[%d]: 0x%02X → Word: 0x%04X (패딩)\n",
+			//       i, byte1, (unsigned short)wordValue);
+		}
+	}
+
+	TRACE("총 %d개의 Word로 변환 완료\n", wordArray.size());
+	return true;
 }

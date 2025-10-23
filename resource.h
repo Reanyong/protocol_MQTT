@@ -33,16 +33,21 @@
 #define IDC_STC_KEEPALIVE               121
 #define IDC_STC_INTERVAL                122
 #define IDC_STC_TAG_COUNT               123
+#define IDC_BTN_EXIT                    124
 #define IDR_MAINFRAME                   134
+#define IDR_TRAY_MENU                   135
+#define ID_TRAY_OPEN                    136
+#define ID_TRAY_EXIT                    137
+#define WM_TRAY_NOTIFICATION            (WM_USER + 200)
 #define IDC_STC_MS                      1021
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        135
-#define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1023
+#define _APS_NEXT_RESOURCE_VALUE        138
+#define _APS_NEXT_COMMAND_VALUE         32773
+#define _APS_NEXT_CONTROL_VALUE         1024
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

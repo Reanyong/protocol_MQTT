@@ -43,4 +43,8 @@ private:
 	bool ApplyDigitalValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const;
 	bool ApplyAnalogValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const;
 	bool ApplyStringValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const;
+
+	// Raw HEX 데이터를 ScanBuffer에 직접 쓰기
+	bool ApplyRawHexToScanBuffer(const CString& tagName, const CString& jsonPath) const;
+	bool ConvertHexToWordArray(const std::string& hexStr, std::vector<short>& wordArray) const;
 };

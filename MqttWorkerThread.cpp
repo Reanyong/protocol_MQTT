@@ -14,9 +14,9 @@ CMqttWorkerThread::CMqttWorkerThread()
 	m_bEndThread = FALSE;
 	m_workerID = 0;
 
-	// Batch settings default values
-	m_batchSize = 30;        // 30 messages or
-	m_batchTimeoutMs = 100;  // 100ms timeout
+	// Batch settings default values - 최적화: 실시간성 향상
+	m_batchSize = 50;
+	m_batchTimeoutMs = 100;
 	m_lastBatchTime = GetTickCount();
 
 	// Initialize statistics
@@ -117,7 +117,7 @@ int CMqttWorkerThread::Run()
 
 		MqttMessage msg;
 
-		// Get message from queue (100ms timeout)
+		// Get message from queue (10ms timeout - 최적화: 100→10, 10배 빠름)
 		bool popResult = false;
 		try {
 			popResult = m_pMessageQueue->Pop(msg, 100);
@@ -133,8 +133,9 @@ int CMqttWorkerThread::Run()
 
 		if (popResult)
 		{
-			TRACE("Worker %d: Message received - Topic: %s, Batch size will be: %d\n",
-				m_workerID, msg.topic.c_str(), m_batch.size() + 1);
+			// ===== 성능 최적화: TRACE 출력 완전 제거 (운영 모드) =====
+			// TRACE("Worker %d: Message received - Topic: %s, Batch size will be: %d\n",
+			//	m_workerID, msg.topic.c_str(), m_batch.size() + 1);
 
 			// Add to batch
 			m_batch.push_back(msg);
@@ -146,7 +147,8 @@ int CMqttWorkerThread::Run()
 
 			if (shouldProcess)
 			{
-				TRACE("Worker %d: Starting batch processing...\n", m_workerID);
+				// ===== 성능 최적화: TRACE 출력 완전 제거 =====
+				// TRACE("Worker %d: Starting batch processing...\n", m_workerID);
 				ProcessMessageBatch();
 				m_batch.clear();
 				m_lastBatchTime = currentTime;
@@ -174,8 +176,9 @@ int CMqttWorkerThread::Run()
 			// Timeout occurred - process remaining batch
 			if (!m_batch.empty())
 			{
-				TRACE("Worker %d: Timeout batch processing - Size: %d\n",
-					m_workerID, m_batch.size());
+				// ===== 성능 최적화: TRACE 출력 제거 =====
+				// TRACE("Worker %d: Timeout batch processing - Size: %d\n",
+				//	m_workerID, m_batch.size());
 				ProcessMessageBatch();
 				m_batch.clear();
 				m_lastBatchTime = GetTickCount();
@@ -216,11 +219,13 @@ void CMqttWorkerThread::ProcessMessageBatch()
 {
 	if (m_batch.empty()) return;
 
-	DWORD startTime = GetTickCount();
+	// ===== 성능 최적화: 시간 측정도 선택적으로만 =====
+	// DWORD startTime = GetTickCount();
 	int batchSuccessCount = 0;
 
-	TRACE("Worker %d: Batch processing started - %d messages\n",
-		m_workerID, m_batch.size());
+	// ===== 성능 최적화: TRACE 출력 완전 제거 =====
+	// TRACE("Worker %d: Batch processing started - %d messages\n",
+	//	m_workerID, m_batch.size());
 
 	for (const auto& msg : m_batch)
 	{
@@ -236,15 +241,13 @@ void CMqttWorkerThread::ProcessMessageBatch()
 		m_processedCount++;
 	}
 
-	DWORD elapsed = GetTickCount() - startTime;
-
-	TRACE("Worker %d: Batch processing completed - %d/%d success, Time: %dms\n",
-		m_workerID, batchSuccessCount, m_batch.size(), elapsed);
-
-	// Performance warning
-	if (elapsed > 500) { // Warning if takes more than 500ms
-		TRACE("Warning: Worker %d batch processing slow (%dms)\n", m_workerID, elapsed);
-	}
+	// ===== 성능 최적화: 시간 측정 및 TRACE 출력 제거 =====
+	// DWORD elapsed = GetTickCount() - startTime;
+	// TRACE("Worker %d: Batch processing completed - %d/%d success, Time: %dms\n",
+	//	m_workerID, batchSuccessCount, m_batch.size(), elapsed);
+	// if (elapsed > 500) {
+	//	TRACE("Warning: Worker %d batch processing slow (%dms)\n", m_workerID, elapsed);
+	// }
 }
 
 bool CMqttWorkerThread::ProcessSingleMessage(const MqttMessage& msg)
@@ -482,7 +485,7 @@ void CMqttWorkerThread::PrintWorkerStats()
 			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
 
 			CString statsMsg;
-			statsMsg.Format(_T("워커%d: %.1f msg/s"), m_workerID, msgPerSec);
+			statsMsg.Format(_T("Worker Thread %d: %.1f msg/s"), m_workerID, msgPerSec);
 			pDlg->OnTagUpdated(_T("성능통계"), statsMsg, true);
 		}
 

@@ -69,13 +69,17 @@ CEVMQTTDlg::CEVMQTTDlg(CWnd* pParent /*=nullptr*/)
 	// EasyView 엔진 종료 감지 관련 초기화
 	m_wm_EVViewStop = 0;
 	m_bEngineExit = FALSE;
+
+	// 시스템 트레이 초기화
+	m_bTrayIconCreated = false;
+	ZeroMemory(&m_nid, sizeof(NOTIFYICONDATA));
 }
 
 void CEVMQTTDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
-	DDX_Control(pDX, IDC_STC_MQTT_STATUS, m_staticMqttStatus);
-	DDX_Control(pDX, IDC_STC_TAG_INFO, m_staticTagInfo);
+	//DDX_Control(pDX, IDC_STC_MQTT_STATUS, m_staticMqttStatus);
+	//DDX_Control(pDX, IDC_STC_TAG_INFO, m_staticTagInfo);
 	DDX_Control(pDX, IDC_STC_PERFORMANCE, m_staticPerformance);
 	DDX_Control(pDX, IDC_STC_ACTIVITY_LABEL, m_staticActivityLabel);
 	DDX_Control(pDX, IDC_LIST_ACTIVITY, m_listActivity);
@@ -86,14 +90,19 @@ BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
 	ON_WM_TIMER()
+	ON_WM_CLOSE()
 	ON_BN_CLICKED(IDC_BTN_SUB, &CEVMQTTDlg::OnBnClickedBtnSub)
 	ON_BN_CLICKED(IDOK, &CEVMQTTDlg::OnBnClickedOk)
 	ON_BN_CLICKED(IDCANCEL, &CEVMQTTDlg::OnBnClickedCancel)
 	ON_MESSAGE(WM_USER + 100, OnUpdateStats)
 	ON_MESSAGE(WM_USER + 102, OnUpdateActivityLog)
+	ON_MESSAGE(WM_USER + 103, OnThreadAutoTerminated)
+	ON_MESSAGE(WM_TRAY_NOTIFICATION, OnTrayNotification)
 	ON_REGISTERED_MESSAGE(m_wm_EVViewStop, OnEasyViewStop)
 	ON_BN_CLICKED(IDC_BTN_CONFIG, &CEVMQTTDlg::OnBnClickedBtnConfig)
 	ON_BN_CLICKED(IDC_BTN_VIEW_LOG, &CEVMQTTDlg::OnBnClickedBtnViewLog)
+	ON_COMMAND(ID_TRAY_OPEN, &CEVMQTTDlg::OnBnClickedOk)
+	ON_COMMAND(ID_TRAY_EXIT, &CEVMQTTDlg::OnBnClickedCancel)
 END_MESSAGE_MAP()
 
 // CEVMQTTDlg 메시지 처리기
@@ -170,11 +179,27 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	CConfigManager& configManager = CConfigManager::GetInstance();
 	configManager.LoadConfig();
 
-	UpdateMqttStatus(false, configManager.GetMqttIp(), configManager.GetMqttPort());
-	UpdateTagInfo(0, configManager.GetAllTagMappings().size());
+	// UpdateMqttStatus 호출 제거 (기능 비활성화)
+	// UpdateTagInfo 호출 제거 (기능 비활성화)
 	UpdatePerformance(0, 0);
 
 	AddActivityLog(_T("시스템"), _T("프로그램 시작"), ActivityLogItem::LOG_INFO, _T("준비"));
+
+	// Autorun 체크 및 자동 시작
+	int autorun = configManager.GetAutorun();
+	if (autorun == 1)
+	{
+		TRACE("Autorun 설정됨 - 통신 자동 시작\n");
+		// 버튼 텍스트 변경
+		CWnd* pBtn = GetDlgItem(IDC_BTN_SUB);
+		if (pBtn)
+		{
+			pBtn->SetWindowText(_T("통신 종료"));
+		}
+		// 통신 시작
+		BeginThreadSub();
+		AddActivityLog(_T("시스템"), _T("Autorun"), ActivityLogItem::LOG_INFO, _T("자동시작"));
+	}
 
 	return TRUE;  // 포커스를 컨트롤에 설정하지 않으면 TRUE를 반환합니다.
 }
@@ -244,16 +269,125 @@ void CEVMQTTDlg::OnBnClickedBtnSub()
 
 void CEVMQTTDlg::OnBnClickedOk()
 {
-	StopThreadSub();
-	DeleteThreadSub();
-	CDialogEx::OnOK();
+	// 트레이 메뉴의 "열기" 선택 시 호출됨
+	if (!IsWindowVisible())
+	{
+		ShowWindow(SW_SHOW);
+		SetForegroundWindow();
+		RemoveTrayIcon();
+		AddActivityLog(_T("시스템"), _T("Foreground"), ActivityLogItem::LOG_INFO, _T("실행중"));
+	}
 }
 
 void CEVMQTTDlg::OnBnClickedCancel()
 {
-	StopThreadSub();
-	DeleteThreadSub();
-	CDialogEx::OnCancel();
+	// IDCANCEL 버튼(종료 버튼) - 종료 확인
+	if (AfxMessageBox(_T("EVMQTT 프로그램을 종료하시겠습니까?"),
+		MB_YESNO | MB_ICONQUESTION) == IDYES)
+	{
+		RemoveTrayIcon();
+		StopThreadSub();
+		DeleteThreadSub();
+		CDialogEx::OnOK();
+	}
+}
+
+void CEVMQTTDlg::OnClose()
+{
+	// EasyView 엔진 종료로 인한 종료인 경우 - 바로 프로그램 종료
+	if (m_bEngineExit)
+	{
+		TRACE("EasyView 엔진 종료로 인한 프로그램 종료 (OnClose)\n");
+		RemoveTrayIcon();
+		CDialogEx::OnOK();
+		return;
+	}
+
+	// 일반 X버튼 클릭 시 - 트레이로 숨기기
+	ShowWindow(SW_HIDE);
+	CreateTrayIcon();
+	AddActivityLog(_T("시스템"), _T("Background"), ActivityLogItem::LOG_INFO, _T("실행중"));
+}
+
+// ==============================================
+// 시스템 트레이 관련 함수
+// ==============================================
+
+void CEVMQTTDlg::CreateTrayIcon()
+{
+	if (m_bTrayIconCreated) return;  // 이미 생성됨
+
+	m_nid.cbSize = sizeof(NOTIFYICONDATA);
+	m_nid.hWnd = this->GetSafeHwnd();
+	m_nid.uID = 1;
+	m_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+	m_nid.uCallbackMessage = WM_TRAY_NOTIFICATION;
+	m_nid.hIcon = m_hIcon;
+
+	// 윈도우 타이틀을 툴팁으로 사용
+	CString windowTitle;
+	GetWindowText(windowTitle);
+	_tcscpy_s(m_nid.szTip, windowTitle);
+
+	if (Shell_NotifyIcon(NIM_ADD, &m_nid))
+	{
+		m_bTrayIconCreated = true;
+		TRACE("트레이 아이콘 생성 성공\n");
+	}
+	else
+	{
+		TRACE("트레이 아이콘 생성 실패\n");
+	}
+}
+
+void CEVMQTTDlg::RemoveTrayIcon()
+{
+	if (m_bTrayIconCreated)
+	{
+		Shell_NotifyIcon(NIM_DELETE, &m_nid);
+		m_bTrayIconCreated = false;
+		TRACE("트레이 아이콘 제거\n");
+	}
+}
+
+LRESULT CEVMQTTDlg::OnTrayNotification(WPARAM wParam, LPARAM lParam)
+{
+	if (lParam == WM_RBUTTONUP)
+	{
+		// 오른쪽 버튼 클릭 - 컨텍스트 메뉴 표시
+		ShowTrayMenu();
+	}
+	else if (lParam == WM_LBUTTONDBLCLK)
+	{
+		// 더블 클릭 - 창 열기
+		ShowWindow(SW_SHOW);
+		SetForegroundWindow();
+		RemoveTrayIcon();
+		AddActivityLog(_T("시스템"), _T("Foreground"), ActivityLogItem::LOG_INFO, _T("실행중"));
+	}
+
+	return 0;
+}
+
+void CEVMQTTDlg::ShowTrayMenu()
+{
+	CMenu menu;
+	menu.CreatePopupMenu();
+	menu.AppendMenu(MF_STRING, ID_TRAY_OPEN, _T("열기"));
+	menu.AppendMenu(MF_STRING, ID_TRAY_EXIT, _T("종료"));
+
+	// 메뉴 표시 위치 설정 (마우스 커서 위치)
+	CPoint pt;
+	GetCursorPos(&pt);
+
+	// 포그라운드 윈도우로 설정 (메뉴가 제대로 동작하도록)
+	SetForegroundWindow();
+
+	// 메뉴 표시
+	menu.TrackPopupMenu(TPM_RIGHTBUTTON, pt.x, pt.y, this);
+
+	// 메뉴 닫힌 후 포스트 메시지 (메뉴 리소스 해제를 위해 필요)
+	PostMessage(WM_NULL, 0, 0);
 }
 
 void CEVMQTTDlg::BeginThreadSub()
@@ -275,8 +409,8 @@ void CEVMQTTDlg::BeginThreadSub()
 		m_pThreadSub->ResumeThread();
 
 		// 연결 상태 업데이트
-		UpdateMqttStatus(true, configManager.GetMqttIp(), configManager.GetMqttPort());
-		UpdateTagInfo(0, configManager.GetAllTagMappings().size());
+		// UpdateMqttStatus 호출 제거 (기능 비활성화)
+		// UpdateTagInfo 호출 제거 (기능 비활성화)
 		AddActivityLog(_T("MQTT"), _T("연결 시도"), ActivityLogItem::LOG_CONNECTION, _T("진행중"));
 	}
 }
@@ -290,7 +424,7 @@ void CEVMQTTDlg::StopThreadSub()
 			PostThreadMessage(m_pThreadSub->m_nThreadID, WM_QUIT, 0, 0);
 			m_pThreadSub->Stop();
 
-			UpdateMqttStatus(false, m_strMqttHost, m_nMqttPort);
+			// UpdateMqttStatus 호출 제거 (기능 비활성화)
 			AddActivityLog(_T("MQTT"), _T("연결 종료"), ActivityLogItem::LOG_CONNECTION, _T("종료"));
 		}
 		catch (...)
@@ -345,10 +479,16 @@ void CEVMQTTDlg::InitStatusControls()
 	CFont* pFont = GetFont();
 	if (pFont)
 	{
-		m_staticMqttStatus.SetFont(pFont);
-		m_staticTagInfo.SetFont(pFont);
+		//m_staticMqttStatus.SetFont(pFont);
+		//m_staticTagInfo.SetFont(pFont);
 		m_staticPerformance.SetFont(pFont);
 	}
+
+	// MQTT 브로커 상태 컨트롤 숨기기
+	//m_staticMqttStatus.ShowWindow(SW_HIDE);
+
+	// 태그 매핑 정보 컨트롤 숨기기
+	//m_staticTagInfo.ShowWindow(SW_HIDE);
 
 	TRACE("상태 컨트롤 초기화 완료\n");
 }
@@ -369,57 +509,23 @@ void CEVMQTTDlg::InitActivityList()
 
 	// 컬럼 추가
 	m_listActivity.InsertColumn(0, _T("시간"), LVCFMT_LEFT, 80);
-	m_listActivity.InsertColumn(1, _T("태그명"), LVCFMT_LEFT, 120);
-	m_listActivity.InsertColumn(2, _T("값"), LVCFMT_LEFT, 150);
-	m_listActivity.InsertColumn(3, _T("상태"), LVCFMT_CENTER, 60);
+	m_listActivity.InsertColumn(1, _T("작업"), LVCFMT_LEFT, 100);
+	m_listActivity.InsertColumn(2, _T("내용"), LVCFMT_LEFT, 200);
+	m_listActivity.InsertColumn(3, _T("상태"), LVCFMT_CENTER, 100);
 
 	TRACE("활동 리스트 초기화 완료\n");
 }
 
 void CEVMQTTDlg::UpdateMqttStatus(bool connected, const CString& host, int port)
 {
-	m_bMqttConnected = connected;
-	m_strMqttHost = host;
-	m_nMqttPort = port;
-
-	CString statusText;
-	if (connected)
-	{
-		statusText.Format(_T("MQTT 브로커: 연결됨 (%s:%d)"), host, port);
-	}
-	else
-	{
-		statusText = _T("MQTT 브로커: 연결 안됨");
-	}
-
-	m_staticMqttStatus.SetWindowText(statusText);
-	TRACE("MQTT 상태 업데이트: %s\n", (LPCTSTR)statusText);
+	// MQTT 브로커 상태 표시 기능 제거됨
+	// UI 업데이트 없음
 }
 
 void CEVMQTTDlg::UpdateTagInfo(int activeTagCount, int totalTagCount)
 {
-	m_nActiveTagCount = activeTagCount;
-	m_nTotalTagCount = totalTagCount;
-
-	CString statusText;
-	
-	if (activeTagCount == 0 && totalTagCount > 0) {
-		// 전체 태그는 있지만 유효한 태그가 0개인 경우
-		statusText.Format(_T("태그 매핑: 사용 불가 (%d개 중 0개 유효)"), totalTagCount);
-	}
-	else if (totalTagCount == 0) {
-		// 태그 자체가 없는 경우
-		statusText = _T("태그 매핑: 설정 없음");
-	}
-	else {
-		// 정상적인 경우
-		statusText.Format(_T("태그 매핑: %d개 활성"), activeTagCount);
-		if (totalTagCount > 0) {
-			statusText.AppendFormat(_T(" / %d개 전체"), totalTagCount);
-		}
-	}
-
-	m_staticTagInfo.SetWindowText(statusText);
+	// 태그 매핑 정보 표시 기능 제거됨
+	// UI 업데이트 없음
 }
 
 void CEVMQTTDlg::UpdatePerformance(int messagesPerSec, int successRate)
@@ -552,21 +658,27 @@ LRESULT CEVMQTTDlg::OnUpdateStats(WPARAM wParam, LPARAM lParam)
 	int parsedCount = (int)wParam;
 	int totalCount = (int)lParam;
 
-	// 성능 계산
+	// 성능 계산 - 호출 시점마다 실제 경과 시간 기반으로 계산
 	DWORD currentTime = GetTickCount();
 	DWORD elapsed = currentTime - m_dwLastUpdateTime;
 
-	if (elapsed >= 1000)  // 1초마다 업데이트
+	// 최소 1초 이상 경과한 경우에만 계산 (0으로 나누기 방지 및 정확도 확보)
+	if (elapsed >= 1000)
 	{
 		int processedDiff = parsedCount - m_nLastProcessedCount;
-		int messagesPerSec = elapsed > 0 ? (processedDiff * 1000 / elapsed) : 0;
+		int messagesPerSec = (processedDiff * 1000) / elapsed;  // 초당 메시지 수
 		int successRate = totalCount > 0 ? (parsedCount * 100 / totalCount) : 0;
 
 		UpdatePerformance(messagesPerSec, successRate);
-		UpdateTagInfo(m_nActiveTagCount, m_nTotalTagCount);  // 주기적으로 갱신
 
 		m_dwLastUpdateTime = currentTime;
 		m_nLastProcessedCount = parsedCount;
+	}
+	else
+	{
+		// 1초 미만인 경우에도 성공률은 업데이트 (성공률은 누적 통계이므로)
+		int successRate = totalCount > 0 ? (parsedCount * 100 / totalCount) : 0;
+		UpdatePerformance(m_nMessagesPerSec, successRate);  // 이전 속도 유지, 성공률만 업데이트
 	}
 
 	return 0;
@@ -575,6 +687,37 @@ LRESULT CEVMQTTDlg::OnUpdateStats(WPARAM wParam, LPARAM lParam)
 LRESULT CEVMQTTDlg::OnUpdateActivityLog(WPARAM wParam, LPARAM lParam)
 {
 	UpdateActivityList();
+	return 0;
+}
+
+LRESULT CEVMQTTDlg::OnThreadAutoTerminated(WPARAM wParam, LPARAM lParam)
+{
+	TRACE("=== OnThreadAutoTerminated: 스레드 자동 종료 감지 ===\n");
+
+	// 스레드 객체 정리
+	if (m_pThreadSub != NULL)
+	{
+		TRACE("스레드 객체 정리 시작\n");
+
+		// 스레드가 이미 종료되었으므로 바로 삭제
+		delete m_pThreadSub;
+		m_pThreadSub = NULL;
+
+		TRACE("스레드 객체 정리 완료\n");
+	}
+
+	// 버튼 텍스트를 '시작'으로 변경
+	CWnd* pBtn = GetDlgItem(IDC_BTN_SUB);
+	if (pBtn)
+	{
+		pBtn->SetWindowText(_T("통신 시작"));
+		TRACE("버튼 텍스트를 '통신 시작'으로 변경\n");
+	}
+
+	// 활동 로그에 최종 알림 추가
+	AddActivityLog(_T("시스템"), _T("자동 종료 완료"), ActivityLogItem::LOG_INFO, _T("대기"));
+
+	TRACE("=== OnThreadAutoTerminated: UI 상태 동기화 완료 ===\n");
 	return 0;
 }
 
@@ -608,7 +751,7 @@ void CEVMQTTDlg::OnTagUpdated(const CString& tagName, const CString& value, bool
 void CEVMQTTDlg::OnMqttConnectionChanged(bool connected)
 {
 	CConfigManager& configManager = CConfigManager::GetInstance();
-	UpdateMqttStatus(connected, configManager.GetMqttIp(), configManager.GetMqttPort());
+	// UpdateMqttStatus 호출 제거 (기능 비활성화)
 
 	CString status = connected ? _T("연결") : _T("끊김");
 	AddActivityLog(_T("MQTT"), configManager.GetMqttIp(), ActivityLogItem::LOG_CONNECTION, status);
@@ -645,8 +788,8 @@ void CEVMQTTDlg::OnBnClickedBtnConfig()
 		CConfigManager& configManager = CConfigManager::GetInstance();
 		configManager.LoadConfig();
 
-		UpdateMqttStatus(false, configManager.GetMqttIp(), configManager.GetMqttPort());
-		UpdateTagInfo(0, configManager.GetAllTagMappings().size());
+		// UpdateMqttStatus 호출 제거 (기능 비활성화)
+		// UpdateTagInfo 호출 제거 (기능 비활성화)
 
 		AddActivityLog(_T("시스템"), _T("설정 변경"), ActivityLogItem::LOG_INFO, _T("완료"));
 	}

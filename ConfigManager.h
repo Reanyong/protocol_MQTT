@@ -70,6 +70,10 @@ public:
 	void SetDevice(const CString& deviceType);
 	CString GetDevice() const;
 
+	// Autorun 설정 메서드
+	void SetAutorun(int autorun);
+	int GetAutorun() const;
+
 private:
 	int m_parsingInterval;
 	CString m_iniFilePath;
@@ -82,6 +86,9 @@ private:
 
 	// Device 타입 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
 	CString m_device;
+
+	// Autorun 설정 (0: 자동 시작 안함, 1: 자동 시작)
+	int m_autorun;
 
 	// 내부 헬퍼 메서드
 	CString GetIniFilePath() const;
