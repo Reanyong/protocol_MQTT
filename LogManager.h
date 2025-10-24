@@ -37,4 +37,7 @@ private:
 
 	// 현재 시간을 문자열로 반환
 	CString GetCurrentTimeString() const;
+
+	// 중첩된 디렉토리 생성 (재귀적)
+	void CreateDirectoryRecursive(const CString& path) const;
 };
