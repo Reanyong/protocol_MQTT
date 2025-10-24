@@ -25,6 +25,12 @@
     <Filter Include="Thread">
       <UniqueIdentifier>{67571134-fd61-4cd7-95f9-ada37c3109bf}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Func\Cache">
+      <UniqueIdentifier>{927e4785-23af-411e-b147-9a51f564c28f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Func\Log">
+      <UniqueIdentifier>{e4119c65-789a-4438-ac0e-46a0bd1dfdf5}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="EVMQTT.h">
@@ -69,8 +75,14 @@
     <ClInclude Include="MqttWorkerThread.h">
       <Filter>Thread</Filter>
     </ClInclude>
+    <ClInclude Include="JsonPathTokenCache.h">
+      <Filter>Func\Cache</Filter>
+    </ClInclude>
+    <ClInclude Include="TagInfoCache.h">
+      <Filter>Func\Cache</Filter>
+    </ClInclude>
     <ClInclude Include="LogManager.h">
-      <Filter>헤더 파일</Filter>
+      <Filter>Func\Log</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -104,8 +116,14 @@
     <ClCompile Include="MqttWorkerThread.cpp">
       <Filter>Thread</Filter>
     </ClCompile>
+    <ClCompile Include="JsonPathTokenCache.cpp">
+      <Filter>Func\Cache</Filter>
+    </ClCompile>
+    <ClCompile Include="TagInfoCache.cpp">
+      <Filter>Func\Cache</Filter>
+    </ClCompile>
     <ClCompile Include="LogManager.cpp">
-      <Filter>소스 파일</Filter>
+      <Filter>Func\Log</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

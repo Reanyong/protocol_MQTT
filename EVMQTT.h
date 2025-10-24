@@ -15,8 +15,11 @@ public:
 // 재정의입니다.
 public:
 	virtual BOOL InitInstance();
+	virtual int ExitInstance();
 
 // 구현입니다.
+private:
+	HANDLE m_hMutex;
 
 	DECLARE_MESSAGE_MAP()
 };

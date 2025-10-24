@@ -255,24 +255,52 @@ bool CTagInfoCache::LoadTagInfoFromAPI(const CString& tagName, TagCacheEntry& ou
 	outEntry.nTagType = tagInfo.nTagType;
 	outEntry.nSBOffset = tagInfo.nTagPos;  // 기본값 (fallback)
 
-	// 3. 태그 타입별로 실제 SBOffset 조회
+	// 3. 태그 타입별로 실제 SBOffset + 포인터 저장
 	int sbOffset = 0;
 	bool offsetFound = false;
 
+	int errorCode = 0;
 	switch (tagInfo.nTagType) {
 	case TYPE_AI:
 	case TYPE_AO:
-		offsetFound = GetAiTagSBOffset(tagInfo.nStnPos, tagInfo.nTagPos, sbOffset);
+	{
+		ST_EV_TAG_ANALOG_INPUT* pAiTag = EV_GetAiTagInfo(tagInfo.nStnPos, tagInfo.nTagPos, &errorCode);
+		if (pAiTag != nullptr && errorCode != 0) {
+			outEntry.pAiTag = pAiTag;  // 포인터 저장!
+			if (pAiTag->nSBOffset >= 0 && pAiTag->nSBOffset < 10000) {
+				sbOffset = pAiTag->nSBOffset;
+				offsetFound = true;
+			}
+		}
 		break;
+	}
 
 	case TYPE_DI:
 	case TYPE_DO:
-		offsetFound = GetDiTagSBOffset(tagInfo.nStnPos, tagInfo.nTagPos, sbOffset);
+	{
+		ST_EV_TAG_DIGITAL_INPUT* pDiTag = EV_GetDiTagInfo(tagInfo.nStnPos, tagInfo.nTagPos, &errorCode);
+		if (pDiTag != nullptr && errorCode == 0) {
+			outEntry.pDiTag = pDiTag;  // 포인터 저장!
+			if (pDiTag->nSBOffset >= 0 && pDiTag->nSBOffset < 10000) {
+				sbOffset = pDiTag->nSBOffset;
+				offsetFound = true;
+			}
+		}
 		break;
+	}
 
 	case TYPE_SI:
-		offsetFound = GetSiTagSBOffset(tagInfo.nStnPos, tagInfo.nTagPos, sbOffset);
+	{
+		ST_EV_TAG_STRING_INPUT* pSiTag = EV_GetSiTagInfo(tagInfo.nStnPos, tagInfo.nTagPos, &errorCode);
+		if (pSiTag != nullptr && errorCode == 0) {
+			outEntry.pSiTag = pSiTag;  // 포인터 저장!
+			if (pSiTag->nSBOffset >= 0 && pSiTag->nSBOffset < 10000) {
+				sbOffset = pSiTag->nSBOffset;
+				offsetFound = true;
+			}
+		}
 		break;
+	}
 
 	default:
 		TRACE("TagInfoCache: Unsupported tag type %d for tag: %S\n",

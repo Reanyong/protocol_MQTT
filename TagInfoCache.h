@@ -25,15 +25,22 @@ public:
 		int nTagType;     // Tag Type (AI/DI/SI 등)
 		bool isValid;     // 캐시 유효성 플래그
 
+		// Phase 3 (Safe): 태그 구조체 포인터 캐싱
+		ST_EV_TAG_ANALOG_INPUT*  pAiTag;   // AI 태그 포인터
+		ST_EV_TAG_DIGITAL_INPUT* pDiTag;   // DI 태그 포인터
+		ST_EV_TAG_STRING_INPUT*  pSiTag;   // SI 태그 포인터
+
 		TagCacheEntry()
 			: nStnPos(0), nTagPos(0), nSBOffset(0),
-			nTagType(0), isValid(false)
+			nTagType(0), isValid(false),
+			pAiTag(nullptr), pDiTag(nullptr), pSiTag(nullptr)
 		{
 		}
 
 		TagCacheEntry(int stnPos, int tagPos, int sbOffset, int tagType)
 			: nStnPos(stnPos), nTagPos(tagPos), nSBOffset(sbOffset),
-			nTagType(tagType), isValid(true)
+			nTagType(tagType), isValid(true),
+			pAiTag(nullptr), pDiTag(nullptr), pSiTag(nullptr)
 		{
 		}
 	};

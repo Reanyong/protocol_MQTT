@@ -117,10 +117,12 @@ int CMqttWorkerThread::Run()
 
 		MqttMessage msg;
 
-		// Get message from queue (10ms timeout - 최적화: 100→10, 10배 빠름)
+		// ===== 성능 최적화: Pop timeout 100ms→10ms =====
+		// 이전: 100ms timeout → 메시지 대기 시 최대 100ms 지연
+		// 현재: 10ms timeout → 메시지 대기 시 최대 10ms 지연, 10배 빠른 반응
 		bool popResult = false;
 		try {
-			popResult = m_pMessageQueue->Pop(msg, 100);
+			popResult = m_pMessageQueue->Pop(msg, 10);
 		}
 		catch (const std::exception& e) {
 			TRACE("Worker %d: Exception during Pop: %s\n", m_workerID, e.what());

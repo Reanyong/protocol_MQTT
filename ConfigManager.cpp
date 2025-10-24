@@ -613,11 +613,24 @@ void CConfigManager::BuildTopicHashMap()
 			wildcardCount++;
 		}
 
-		// HashMap에 추가
-		if (topic != _T("+")) {
-			m_topicToTagMap[topic] = TagMappingInfo(tagName, jsonPath);
-			successCount++;
+	// HashMap에 추가
+	if (topic != _T("+")) {
+		m_topicToTagMap[topic] = TagMappingInfo(tagName, jsonPath);
+		successCount++;
+		
+		// 디버깅: 처음 5개만 출력
+		if (successCount <= 5) {
+			TRACE("  [%d] Map에 추가: Topic='%S' → Tag='%S', JSONPath='%S'\n",
+				successCount, (LPCTSTR)topic, (LPCTSTR)tagName, (LPCTSTR)jsonPath);
 		}
+	}
+	else {
+		// 와일드카드 토픽은 Map에 추가하지 않음
+		if (wildcardCount <= 3) {
+			TRACE("  [와일드카드 %d] 건너뜀: Tag='%S', Mapping='%S'\n",
+				wildcardCount, (LPCTSTR)tagName, (LPCTSTR)tagMapping);
+		}
+	}
 	}
 
 	DWORD elapsed = GetTickCount() - startTime;

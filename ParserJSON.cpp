@@ -80,7 +80,28 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 	
 	// O(log N) 검색으로 태그 정보 조회 (201개 → 8번 비교)
 	if (!configManager.GetTagByTopic(mqttTopic, tagInfo)) {
-		// TRACE("토픽에 매핑된 태그 없음: %S\n", (LPCTSTR)mqttTopic);
+		TRACE("토픽에 매핑된 태그 없음: '%S' (Map에 없음!)\n", (LPCTSTR)mqttTopic);
+		
+		// 디버깅: Map에 어떤 토픽들이 있는지 출력 (최초 1회만)
+		static bool mapDebugPrinted = false;
+		if (!mapDebugPrinted) {
+			mapDebugPrinted = true;
+			TRACE("=== 디버깅: Topic Map 내용 확인 ===\n");
+			std::map<CString, CString> allMappings = configManager.GetAllTagMappings();
+			TRACE("전체 매핑 개수: %d\n", allMappings.size());
+			
+			int printCount = 0;
+			for (const auto& m : allMappings) {
+				if (printCount < 5) {  // 처음 5개만 출력
+					TRACE("  [%d] 태그='%S', 매핑='%S'\n", 
+						printCount + 1, (LPCTSTR)m.first, (LPCTSTR)m.second);
+					printCount++;
+				}
+			}
+			if (allMappings.size() > 5) {
+				TRACE("  ... 외 %d개 더 있음\n", allMappings.size() - 5);
+			}
+		}
 		return false;
 	}
 
@@ -497,24 +518,44 @@ bool CJsonParser::ApplyRawHexToScanBuffer(const CString& tagName, const CString&
 
 		int nStnPos, nTagPos, nSBOffset, nTagType;
 
+		// ===== Phase 3: AI/AO 태그는 EV_PutSBAiValue 사용, 나머지는 EV_PutSBBuffer =====
 		if (cacheHit) {
-			// 캐시 히트: 즉시 사용 (매우 빠름 ~1ms)
 			nStnPos = cacheEntry.nStnPos;
 			nTagPos = cacheEntry.nTagPos;
 			nSBOffset = cacheEntry.nSBOffset;
 			nTagType = cacheEntry.nTagType;
 
-			// ===== 성능 최적화: 통계 출력 완전 제거 =====
-			// static int hitMsgCount = 0;
-			// if (++hitMsgCount % 1000 == 0) {
-			//	TRACE("[CACHE HIT #%d] Tag: %S, SBOffset=%d, Time=%dms\n",
-			//		hitMsgCount, (LPCTSTR)tagName, nSBOffset, cacheElapsed);
-			// }
-		}
-		else {
-			// 캐시 미스: 기존 API 호출 방식 (느림 ~10-50ms)
-			// TRACE("[CACHE MISS] Tag: %S - Using legacy API calls\n", (LPCTSTR)tagName);  // 성능 최적화
+			// AI/AO 태그: EV_PutSBAiValue 호출
+			if (nTagType == TYPE_AI || nTagType == TYPE_AO) {
+				if (wordArray.size() > 0) {
+					double engValue = static_cast<double>(wordArray[0]);
+					int result = EV_PutSBAiValue(nStnPos, nTagPos, engValue);
 
+					if (result > 0) {
+						return true;
+					}
+					else {
+						TRACE("EV_PutSBAiValue 실패: result=%d\n", result);
+						return false;
+					}
+				}
+			}
+			// 그 외 태그: EV_PutSBBuffer 사용
+			else {
+				int result = EV_PutSBBuffer(nStnPos, nSBOffset, wordArray.data(),
+					static_cast<int>(wordArray.size()));
+
+				if (result > 0) {
+					return true;
+				}
+				else {
+					TRACE("EV_PutSBBuffer 실패: result=%d\n", result);
+					return false;
+				}
+			}
+		}
+		// ===== 캐시 미스: 기존 API 호출 =====
+		else {
 			ST_EV_TAG_INFO tagInfo;
 			int tagResult = EV_GetTagInfo(tagName, &tagInfo);
 			if (tagResult <= 0) {
@@ -525,77 +566,39 @@ bool CJsonParser::ApplyRawHexToScanBuffer(const CString& tagName, const CString&
 			nStnPos = tagInfo.nStnPos;
 			nTagPos = tagInfo.nTagPos;
 			nTagType = tagInfo.nTagType;
-			nSBOffset = tagInfo.nTagPos;  // 기본값
+			nSBOffset = tagInfo.nTagPos;
 
-			// 타입별 SBOffset 조회 (기존 코드 유지)
-			int errorCode = 0;
-			switch (nTagType) {
-			case TYPE_AI:
-			case TYPE_AO:
-			{
-				ST_EV_TAG_ANALOG_INPUT* pAiTag = EV_GetAiTagInfo(nStnPos, nTagPos, &errorCode);
-				if (pAiTag != nullptr && errorCode != 0) {
-					if (pAiTag->nSBOffset >= 0 && pAiTag->nSBOffset < 10000) {
-						nSBOffset = pAiTag->nSBOffset;
-					}
+			// AI/AO 태그
+			if (nTagType == TYPE_AI || nTagType == TYPE_AO) {
+				if (wordArray.size() > 0) {
+					double engValue = static_cast<double>(wordArray[0]);
+					int result = EV_PutSBAiValue(nStnPos, nTagPos, engValue);
+					return (result > 0);
 				}
-				break;
 			}
-			case TYPE_DI:
-			case TYPE_DO:
-			{
-				ST_EV_TAG_DIGITAL_INPUT* pDiTag = EV_GetDiTagInfo(nStnPos, nTagPos, &errorCode);
-				if (pDiTag != nullptr && errorCode == 0) {
-					if (pDiTag->nSBOffset >= 0 && pDiTag->nSBOffset < 10000) {
+			// 그 외 태그
+			else {
+				int errorCode = 0;
+				if (nTagType == TYPE_DI || nTagType == TYPE_DO) {
+					ST_EV_TAG_DIGITAL_INPUT* pDiTag = EV_GetDiTagInfo(nStnPos, nTagPos, &errorCode);
+					if (pDiTag && errorCode == 0 && pDiTag->nSBOffset >= 0) {
 						nSBOffset = pDiTag->nSBOffset;
 					}
 				}
-				break;
-			}
-			case TYPE_SI:
-			{
-				ST_EV_TAG_STRING_INPUT* pSiTag = EV_GetSiTagInfo(nStnPos, nTagPos, &errorCode);
-				if (pSiTag != nullptr && errorCode == 0) {
-					if (pSiTag->nSBOffset >= 0 && pSiTag->nSBOffset < 10000) {
+				else if (nTagType == TYPE_SI) {
+					ST_EV_TAG_STRING_INPUT* pSiTag = EV_GetSiTagInfo(nStnPos, nTagPos, &errorCode);
+					if (pSiTag && errorCode == 0 && pSiTag->nSBOffset >= 0) {
 						nSBOffset = pSiTag->nSBOffset;
 					}
 				}
-				break;
+
+				int result = EV_PutSBBuffer(nStnPos, nSBOffset, wordArray.data(),
+					static_cast<int>(wordArray.size()));
+				return (result > 0);
 			}
-			}
-
-			//TRACE("[CACHE MISS] Final SBOffset=%d, Total time=%dms\n", nSBOffset, cacheElapsed);
 		}
 
-		// ===== ScanBuffer에 직접 쓰기 =====
-		int result = EV_PutSBBuffer(
-			nStnPos,                               // Station Position
-			nSBOffset,                             // Word Offset
-			wordArray.data(),                      // 소스 데이터
-			static_cast<int>(wordArray.size())     // Word 개수
-		);
-
-		if (result > 0) {
-			// ===== 성능 최적화: 성공 로그 완전 제거 =====
-			// static int successCount = 0;
-			// if (++successCount % 1000 == 0) {
-			//	TRACE("[SUCCESS #%d] Station[%d] SB[%d] ← %d Words (Cache time=%dms)\n",
-			//		successCount, nStnPos, nSBOffset, wordArray.size(), cacheElapsed);
-			// }
-			return true;
-		}
-		else {
-			TRACE("ScanBuffer 쓰기 실패: result=%d\n", result);
-
-			// 에러 로그 기록
-			CLogManager& logManager = CLogManager::GetInstance();
-			CString errorMsg;
-			errorMsg.Format(_T("ScanBuffer 쓰기 실패: Station=%d, SBOffset=%d, Words=%d, Result=%d"),
-				nStnPos, nSBOffset, wordArray.size(), result);
-			logManager.WriteErrorLog(_T("SB 쓰기실패"), tagName, errorMsg, CString(hexStr.c_str()));
-
-			return false;
-		}
+		return false;
 	}
 	catch (const std::exception& e) {
 		TRACE("Raw HEX 처리 중 예외 발생: %s\n", e.what());
