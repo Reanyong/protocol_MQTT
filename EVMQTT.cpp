@@ -34,8 +34,30 @@ CEVMQTTApp theApp;
 
 BOOL CEVMQTTApp::InitInstance()
 {
-	// 중복 실행 방지
-	m_hMutex = CreateMutex(NULL, TRUE, _T("EVMQTT_SINGLE_INSTANCE_MUTEX"));
+	// 중복 실행 방지 (실행 파일명 기반)
+	// EVMQTT1.exe, EVMQTT2.exe, EVMQTT3.exe, EVMQTT4.exe는 각각 독립 실행 가능
+	// 하지만 같은 이름끼리는 중복 실행 불가
+	TCHAR szModulePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, szModulePath, MAX_PATH);
+	
+	CString strModulePath(szModulePath);
+	int nPos = strModulePath.ReverseFind(_T('\\'));
+	CString exeName = _T("EVMQTT");  // 기본값
+	
+	if (nPos > 0) {
+		exeName = strModulePath.Mid(nPos + 1);
+		int dotPos = exeName.ReverseFind(_T('.'));
+		if (dotPos > 0) {
+			exeName = exeName.Left(dotPos);  // 확장자 제거
+		}
+	}
+	
+	// 실행 파일명 기반 Mutex 이름 생성
+	// 예: "EVMQTT1_SINGLE_INSTANCE_MUTEX", "EVMQTT2_SINGLE_INSTANCE_MUTEX"
+	CString mutexName;
+	mutexName.Format(_T("%s_SINGLE_INSTANCE_MUTEX"), exeName);
+	
+	m_hMutex = CreateMutex(NULL, TRUE, mutexName);
 	if (GetLastError() == ERROR_ALREADY_EXISTS)
 	{
 		if (m_hMutex)
@@ -43,7 +65,10 @@ BOOL CEVMQTTApp::InitInstance()
 			CloseHandle(m_hMutex);
 			m_hMutex = NULL;
 		}
-		AfxMessageBox(_T("EVMQTT 프로그램이 이미 실행되어 있습니다."), MB_OK | MB_ICONWARNING);
+		
+		CString errorMsg;
+		errorMsg.Format(_T("%s 프로그램이 이미 실행되어 있습니다."), exeName);
+		AfxMessageBox(errorMsg, MB_OK | MB_ICONWARNING);
 		return FALSE;
 	}
 

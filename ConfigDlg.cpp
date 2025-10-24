@@ -192,7 +192,7 @@ void CConfigDlg::InitTagMappingList()
 	// 컬럼 추가
 	m_listTagMapping.InsertColumn(0, _T("태그명"), LVCFMT_LEFT, 120);
 	m_listTagMapping.InsertColumn(1, _T("토픽"), LVCFMT_LEFT, 100);
-	m_listTagMapping.InsertColumn(2, _T("JSONPath"), LVCFMT_LEFT, 300);
+	m_listTagMapping.InsertColumn(2, _T("JSONPath"), LVCFMT_LEFT, 150);
 
 	TRACE("태그 매핑 리스트 초기화 완료\n");
 }

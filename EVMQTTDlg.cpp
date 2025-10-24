@@ -133,6 +133,11 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	SetIcon(m_hIcon, TRUE);			// 큰 아이콘을 설정합니다.
 	SetIcon(m_hIcon, FALSE);		// 작은 아이콘을 설정합니다.
 
+	// 창 크기 조절 불가 설정
+	// WS_THICKFRAME: 크기 조절 가능한 테두리 제거
+	// WS_MAXIMIZEBOX: 최대화 버튼 제거
+	ModifyStyle(WS_THICKFRAME | WS_MAXIMIZEBOX, 0);
+
 	// 새로운 UI 초기화
 	InitStatusControls();
 	InitActivityList();
