@@ -9,7 +9,8 @@ CConfigManager::CConfigManager()
 	, m_mqttPort(1883)            // 기본 포트
 	, m_mqttKeepAlive(60)         // 기본 keepalive
 	, m_subscribeTopic(_T("+"))   // 기본값 모든 토픽
-	, m_device(_T(""))
+	, m_deviceType(_T("IFM"))     // 기본값 IFM
+	, m_publishInterval(1000)     // 기본값 1000ms
 	, m_autorun(0)                // 기본값 0 (자동 시작 안함)
 {
 	// INI 파일 경로 설정 (실행 파일과 같은 경로에 저장)
@@ -66,8 +67,11 @@ bool CConfigManager::LoadConfig()
 			szMqttIp, 64, m_iniFilePath);
 		m_mqttIp = szMqttIp;
 
-		// Device 설정 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
-		m_device = _T("");
+		// Device 타입 설정 로드
+		TCHAR szDeviceType[64] = { 0 };
+		GetPrivateProfileString(_T("General"), _T("Device"), _T("IFM"),
+			szDeviceType, 64, m_iniFilePath);
+		m_deviceType = szDeviceType;
 
 		// MQTT 구독 토픽 설정
 		TCHAR szSubscribeTopic[128] = { 0 };
@@ -81,7 +85,21 @@ bool CConfigManager::LoadConfig()
 		// Autorun 설정 로드 (기본값 0)
 		m_autorun = GetPrivateProfileInt(_T("General"), _T("Autorun"), 0, m_iniFilePath);
 
-		result = result && LoadTagMappings();
+		// Publish 주기 로드 (Navifra 모드 전용, 기본값 1000ms)
+		m_publishInterval = GetPrivateProfileInt(_T("General"), _T("PublishInterval"), 1000, m_iniFilePath);
+
+		// Device Type에 따라 태그 매핑 로드
+		if (m_deviceType == _T("IFM")) {
+			result = result && LoadSubTagMappings();
+		}
+		else if (m_deviceType == _T("Navifra")) {
+			result = result && LoadPubTagMappings();
+		}
+		else {
+			// 기본적으로 둘 다 로드
+			result = result && LoadSubTagMappings();
+			result = result && LoadPubTagMappings();
+		}
 
 		// ===== HashMap 구축 (성능 최적화) =====
 		if (result) {
@@ -122,7 +140,8 @@ bool CConfigManager::SaveConfig()
 
 		// WritePrivateProfileString(_T("TagInfo"), _T("TagGroup"), m_tagGroup, m_iniFilePath);
 
-		// Device 설정 저장 제거 (사용하지 않음)
+		// Device 타입 저장
+		WritePrivateProfileString(_T("General"), _T("Device"), m_deviceType, m_iniFilePath);
 
 		// MQTT 구독 토픽 저장
 		WritePrivateProfileString(_T("General"), _T("SubscribeTopic"), m_subscribeTopic, m_iniFilePath);
@@ -132,7 +151,23 @@ bool CConfigManager::SaveConfig()
 		strAutorun.Format(_T("%d"), m_autorun);
 		WritePrivateProfileString(_T("General"), _T("Autorun"), strAutorun, m_iniFilePath);
 
-		result = result && SaveTagMappings();
+		// Publish 주기 저장
+		CString strPublishInterval;
+		strPublishInterval.Format(_T("%d"), m_publishInterval);
+		WritePrivateProfileString(_T("General"), _T("PublishInterval"), strPublishInterval, m_iniFilePath);
+
+		// Device Type에 따라 태그 매핑 저장
+		if (m_deviceType == _T("IFM")) {
+			result = result && SaveSubTagMappings();
+		}
+		else if (m_deviceType == _T("Navifra")) {
+			result = result && SavePubTagMappings();
+		}
+		else {
+			// 기본적으로 둘 다 저장
+			result = result && SaveSubTagMappings();
+			result = result && SavePubTagMappings();
+		}
 
 		return result;
 	}
@@ -164,20 +199,41 @@ int CConfigManager::GetParsingInterval() const
 //	m_tagGroup = tagGroup;
 // }
 
+// ===== Subscribe 태그 매핑 =====
+std::map<CString, CString> CConfigManager::GetAllSubTagMappings() const
+{
+	return m_subTagMappings;
+}
+
+// ===== Publish 태그 매핑 =====
+std::map<CString, CString> CConfigManager::GetAllPubTagMappings() const
+{
+	return m_pubTagMappings;
+}
+
+// ===== 하위 호환성 (기존 코드용) =====
 std::map<CString, CString> CConfigManager::GetAllTagMappings() const
 {
-	return m_tagMappings;
+	// Device Type에 따라 적절한 매핑 반환
+	if (m_deviceType == _T("IFM")) {
+		return m_subTagMappings;
+	}
+	else if (m_deviceType == _T("Navifra")) {
+		return m_pubTagMappings;
+	}
+	return m_subTagMappings;  // 기본값
 }
 
 
-bool CConfigManager::LoadTagMappings()
+// ===== Subscribe 태그 매핑 로드 (IFM 모드) =====
+bool CConfigManager::LoadSubTagMappings()
 {
 	//try {
-	//	m_tagMappings.clear();
+	//	m_subTagMappings.clear();
 
-	//	// INI 파일에서 [TagMapping] 섹션 읽기
+	//	// INI 파일에서 [SubTagMapping] 섹션 읽기
 	//	TCHAR szBuffer[8192] = { 0 };
-	//	DWORD dwRead = GetPrivateProfileSection(_T("TagMapping"), szBuffer, 8192, m_iniFilePath);
+	//	DWORD dwRead = GetPrivateProfileSection(_T("SubTagMapping"), szBuffer, 8192, m_iniFilePath);
 
 	//	if (dwRead > 0) {
 	//		TCHAR* p = szBuffer;
@@ -219,14 +275,14 @@ bool CConfigManager::LoadTagMappings()
 	//}
 
 	try {
-		m_tagMappings.clear();
+		m_subTagMappings.clear();
 
-		TRACE("=== 스마트 태그 매핑 로드 시작 ===\n");
+		TRACE("=== SubTagMapping (IFM 모드) 로드 시작 ===\n");
 
 		// 스마트한 INI 섹션 읽기
 		std::vector<CString> tagLines;
-		if (!ReadIniSectionSmart(_T("TagMapping"), tagLines)) {
-			TRACE("태그 매핑 섹션 읽기 실패\n");
+		if (!ReadIniSectionSmart(_T("SubTagMapping"), tagLines)) {
+			TRACE("SubTagMapping 섹션 읽기 실패\n");
 			return false;
 		}
 
@@ -241,11 +297,11 @@ bool CConfigManager::LoadTagMappings()
 
 			if (ParseTagMappingLine(line, tagName, mapping)) {
 				// 중복 태그 체크
-				if (m_tagMappings.find(tagName) != m_tagMappings.end()) {
+				if (m_subTagMappings.find(tagName) != m_subTagMappings.end()) {
 					TRACE("경고: 중복 태그 발견, 덮어씀 - %s\n", (LPCTSTR)tagName);
 				}
 
-				m_tagMappings[tagName] = mapping;
+				m_subTagMappings[tagName] = mapping;
 				successCount++;
 
 				// 처음 10개와 마지막 10개만 상세 로그
@@ -259,13 +315,13 @@ bool CConfigManager::LoadTagMappings()
 			}
 		}
 
-		TRACE("=== 태그 매핑 로드 완료 ===\n");
+		TRACE("=== SubTagMapping 로드 완료 ===\n");
 		TRACE("성공: %d개, 건너뜀: %d개, 전체: %d개\n",
 			successCount, skipCount, tagLines.size());
 
 		// 메모리 사용량 추정
 		size_t estimatedMemory = 0;
-		for (const auto& pair : m_tagMappings) {
+		for (const auto& pair : m_subTagMappings) {
 			estimatedMemory += (pair.first.GetLength() + pair.second.GetLength()) * sizeof(TCHAR);
 		}
 		TRACE("추정 메모리 사용량: %.2f KB\n", estimatedMemory / 1024.0);
@@ -273,14 +329,93 @@ bool CConfigManager::LoadTagMappings()
 		return successCount > 0;
 	}
 	catch (const std::exception& e) {
-		TRACE("태그 매핑 로드 중 예외: %s\n", e.what());
+		TRACE("SubTagMapping 로드 중 예외: %s\n", e.what());
 		return false;
 	}
 	catch (...) {
-		TRACE("태그 매핑 로드 중 알 수 없는 예외\n");
+		TRACE("SubTagMapping 로드 중 알 수 없는 예외\n");
 		return false;
 	}
+}
 
+// ===== Publish 태그 매핑 로드 =====
+bool CConfigManager::LoadPubTagMappings()
+{
+	try {
+		m_pubTagMappings.clear();
+
+		TRACE("=== PubTagMapping (Navifra 모드) 로드 시작 ===\n");
+
+		// 스마트한 INI 섹션 읽기
+		std::vector<CString> tagLines;
+		if (!ReadIniSectionSmart(_T("PubTagMapping"), tagLines)) {
+			TRACE("PubTagMapping 섹션 읽기 실패\n");
+			return false;
+		}
+
+		TRACE("읽어온 라인 수: %d\n", tagLines.size());
+
+		// 각 라인 파싱
+		int successCount = 0;
+		int skipCount = 0;
+
+		for (const auto& line : tagLines) {
+			CString tagName, mapping;
+
+			if (ParseTagMappingLine(line, tagName, mapping)) {
+				// 중복 태그 체크
+				if (m_pubTagMappings.find(tagName) != m_pubTagMappings.end()) {
+					TRACE("경고: 중복 태그 발견, 덮어씀 - %s\n", (LPCTSTR)tagName);
+				}
+
+				m_pubTagMappings[tagName] = mapping;
+				successCount++;
+
+				// 처음 10개와 마지막 10개만 상세 로그
+				if (successCount <= 10 || successCount > (int)tagLines.size() - 10) {
+					TRACE("태그[%03d]: %s -> %s\n", successCount,
+						(LPCTSTR)tagName, (LPCTSTR)mapping);
+				}
+			}
+			else {
+				skipCount++;
+			}
+		}
+
+		TRACE("=== PubTagMapping 로드 완료 ===\n");
+		TRACE("성공: %d개, 건너뜀: %d개, 전체: %d개\n",
+			successCount, skipCount, tagLines.size());
+
+		// 메모리 사용량 추정
+		size_t estimatedMemory = 0;
+		for (const auto& pair : m_pubTagMappings) {
+			estimatedMemory += (pair.first.GetLength() + pair.second.GetLength()) * sizeof(TCHAR);
+		}
+		TRACE("추정 메모리 사용량: %.2f KB\n", estimatedMemory / 1024.0);
+
+		return successCount > 0;
+	}
+	catch (const std::exception& e) {
+		TRACE("PubTagMapping 로드 중 예외: %s\n", e.what());
+		return false;
+	}
+	catch (...) {
+		TRACE("PubTagMapping 로드 중 알 수 없는 예외\n");
+		return false;
+	}
+}
+
+// ===== 하위 호환성 (기존 코드용) =====
+bool CConfigManager::LoadTagMappings()
+{
+	// Device Type에 따라 적절한 매핑 로드
+	if (m_deviceType == _T("IFM")) {
+		return LoadSubTagMappings();
+	}
+	else if (m_deviceType == _T("Navifra")) {
+		return LoadPubTagMappings();
+	}
+	return LoadSubTagMappings();  // 기본값
 }
 
 bool CConfigManager::ReadIniSectionSmart(const CString& sectionName, std::vector<CString>& lines)
@@ -450,63 +585,156 @@ DWORD CConfigManager::GetOptimalBufferSize(const CString& sectionName)
 }
 
 
-bool CConfigManager::SaveTagMappings()
+// ===== Subscribe 태그 매핑 저장 (IFM 모드) =====
+bool CConfigManager::SaveSubTagMappings()
 {
 	try {
-		WritePrivateProfileSection(_T("TagMapping"), NULL, m_iniFilePath);
+		WritePrivateProfileSection(_T("SubTagMapping"), NULL, m_iniFilePath);
 
 		// 새로운 태그 매핑들 저장
-		for (const auto& mapping : m_tagMappings) {
-			WritePrivateProfileString(_T("TagMapping"), mapping.first, mapping.second, m_iniFilePath);
+		for (const auto& mapping : m_subTagMappings) {
+			WritePrivateProfileString(_T("SubTagMapping"), mapping.first, mapping.second, m_iniFilePath);
 		}
 
 		return true;
 	}
 	catch (const std::exception& e) {
-		OutputDebugStringA("태그 매핑 저장 오류: ");
+		OutputDebugStringA("SubTagMapping 저장 오류: ");
 		OutputDebugStringA(e.what());
 		OutputDebugStringA("\n");
 		return false;
 	}
 }
 
+// ===== Publish 태그 매핑 저장 =====
+bool CConfigManager::SavePubTagMappings()
+{
+	try {
+		WritePrivateProfileSection(_T("PubTagMapping"), NULL, m_iniFilePath);
+
+		// 새로운 태그 매핑들 저장
+		for (const auto& mapping : m_pubTagMappings) {
+			WritePrivateProfileString(_T("PubTagMapping"), mapping.first, mapping.second, m_iniFilePath);
+		}
+
+		return true;
+	}
+	catch (const std::exception& e) {
+		OutputDebugStringA("PubTagMapping 저장 오류: ");
+		OutputDebugStringA(e.what());
+		OutputDebugStringA("\n");
+		return false;
+	}
+}
+
+// ===== 하위 호환성 (기존 코드용) =====
+bool CConfigManager::SaveTagMappings()
+{
+	// Device Type에 따라 적절한 매핑 저장
+	if (m_deviceType == _T("IFM")) {
+		return SaveSubTagMappings();
+	}
+	else if (m_deviceType == _T("Navifra")) {
+		return SavePubTagMappings();
+	}
+	return SaveSubTagMappings();  // 기본값
+}
+
 void CConfigManager::AddTagMapping(const CString& tagName, const CString& mapping)
 {
-	m_tagMappings[tagName] = mapping;
+	// Device Type에 따라 적절한 매핑에 추가
+	if (m_deviceType == _T("IFM")) {
+		m_subTagMappings[tagName] = mapping;
+		WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
+	}
+	else if (m_deviceType == _T("Navifra")) {
+		m_pubTagMappings[tagName] = mapping;
+		WritePrivateProfileString(_T("PubTagMapping"), tagName, mapping, m_iniFilePath);
+	}
+	else {
+		m_subTagMappings[tagName] = mapping;
+		WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
+	}
 	TRACE("태그 매핑 추가: %s -> %s\n", (LPCTSTR)tagName, (LPCTSTR)mapping);
-
-	WritePrivateProfileString(_T("TagMapping"), tagName, mapping, m_iniFilePath);
 }
 
 void CConfigManager::SetTagMapping(const CString& tagName, const CString& mapping)
 {
-	m_tagMappings[tagName] = mapping;
+	// Device Type에 따라 적절한 매핑 설정
+	if (m_deviceType == _T("IFM")) {
+		m_subTagMappings[tagName] = mapping;
+		WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
+	}
+	else if (m_deviceType == _T("Navifra")) {
+		m_pubTagMappings[tagName] = mapping;
+		WritePrivateProfileString(_T("PubTagMapping"), tagName, mapping, m_iniFilePath);
+	}
+	else {
+		m_subTagMappings[tagName] = mapping;
+		WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
+	}
 	TRACE("태그 매핑 설정: %s -> %s\n", (LPCTSTR)tagName, (LPCTSTR)mapping);
-
-	WritePrivateProfileString(_T("TagMapping"), tagName, mapping, m_iniFilePath);
 }
 
 void CConfigManager::RemoveTagMapping(const CString& tagName)
 {
-	auto it = m_tagMappings.find(tagName);
-	if (it != m_tagMappings.end()) {
-		m_tagMappings.erase(it);
-		TRACE("태그 매핑 삭제: %s\n", (LPCTSTR)tagName);
-
-		WritePrivateProfileString(_T("TagMapping"), tagName, NULL, m_iniFilePath);
+	// Device Type에 따라 적절한 매핑에서 삭제
+	if (m_deviceType == _T("IFM")) {
+		auto it = m_subTagMappings.find(tagName);
+		if (it != m_subTagMappings.end()) {
+			m_subTagMappings.erase(it);
+			WritePrivateProfileString(_T("SubTagMapping"), tagName, NULL, m_iniFilePath);
+		}
 	}
+	else if (m_deviceType == _T("Navifra")) {
+		auto it = m_pubTagMappings.find(tagName);
+		if (it != m_pubTagMappings.end()) {
+			m_pubTagMappings.erase(it);
+			WritePrivateProfileString(_T("PubTagMapping"), tagName, NULL, m_iniFilePath);
+		}
+	}
+	else {
+		auto it = m_subTagMappings.find(tagName);
+		if (it != m_subTagMappings.end()) {
+			m_subTagMappings.erase(it);
+			WritePrivateProfileString(_T("SubTagMapping"), tagName, NULL, m_iniFilePath);
+		}
+	}
+	TRACE("태그 매핑 삭제: %s\n", (LPCTSTR)tagName);
 }
 
 bool CConfigManager::HasTagMapping(const CString& tagName) const
 {
-	return m_tagMappings.find(tagName) != m_tagMappings.end();
+	// Device Type에 따라 적절한 매핑 검색
+	if (m_deviceType == _T("IFM")) {
+		return m_subTagMappings.find(tagName) != m_subTagMappings.end();
+	}
+	else if (m_deviceType == _T("Navifra")) {
+		return m_pubTagMappings.find(tagName) != m_pubTagMappings.end();
+	}
+	return m_subTagMappings.find(tagName) != m_subTagMappings.end();
 }
 
 CString CConfigManager::GetTagMapping(const CString& tagName) const
 {
-	auto it = m_tagMappings.find(tagName);
-	if (it != m_tagMappings.end()) {
-		return it->second;
+	// Device Type에 따라 적절한 매핑 조회
+	if (m_deviceType == _T("IFM")) {
+		auto it = m_subTagMappings.find(tagName);
+		if (it != m_subTagMappings.end()) {
+			return it->second;
+		}
+	}
+	else if (m_deviceType == _T("Navifra")) {
+		auto it = m_pubTagMappings.find(tagName);
+		if (it != m_pubTagMappings.end()) {
+			return it->second;
+		}
+	}
+	else {
+		auto it = m_subTagMappings.find(tagName);
+		if (it != m_subTagMappings.end()) {
+			return it->second;
+		}
 	}
 	return _T("");
 }
@@ -541,17 +769,16 @@ int CConfigManager::GetMqttKeepAlive() const
 	return m_mqttKeepAlive;
 }
 
-// Device 관련 메서드 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
-void CConfigManager::SetDevice(const CString& deviceType)
+// Device 타입 관련 메서드
+void CConfigManager::SetDeviceType(const CString& deviceType)
 {
-	// Device 설정 무시 - 모든 데이터에 1 곱하기 적용
-	TRACE("Device 설정 무시됨 (모든 데이터에 1 곱하기 적용): %s\n", (LPCTSTR)deviceType);
+	m_deviceType = deviceType;
+	TRACE("Device 타입 설정: %s\n", (LPCTSTR)deviceType);
 }
 
-CString CConfigManager::GetDevice() const
+CString CConfigManager::GetDeviceType() const
 {
-	// 빈 문자열 반환 - Device 설정 사용하지 않음
-	return _T("");
+	return m_deviceType;
 }
 
 // MQTT 구독 토픽 관련 메서드
@@ -578,6 +805,18 @@ int CConfigManager::GetAutorun() const
 	return m_autorun;
 }
 
+// Publish 주기 관련 메서드 (Navifra 모드 전용)
+void CConfigManager::SetPublishInterval(int interval)
+{
+	m_publishInterval = interval;
+	TRACE("Publish 주기 설정: %dms\n", interval);
+}
+
+int CConfigManager::GetPublishInterval() const
+{
+	return m_publishInterval;
+}
+
 // ===== Map 기반 빠른 조회 구현 (성능 최적화) =====
 
 void CConfigManager::BuildTopicHashMap()
@@ -591,7 +830,8 @@ void CConfigManager::BuildTopicHashMap()
 	int successCount = 0;
 	int wildcardCount = 0;
 
-	for (const auto& mapping : m_tagMappings) {
+	// IFM 모드: SubTagMapping 사용
+	for (const auto& mapping : m_subTagMappings) {
 		const CString& tagName = mapping.first;
 		const CString& tagMapping = mapping.second;
 
@@ -637,7 +877,7 @@ void CConfigManager::BuildTopicHashMap()
 
 	TRACE("=== Topic Map 구축 완료 ===\n");
 	TRACE("성공: %d개, 와일드카드: %d개, 전체: %d개\n",
-		successCount, wildcardCount, m_tagMappings.size());
+		successCount, wildcardCount, m_subTagMappings.size());
 	TRACE("Map 크기: %d entries\n", m_topicToTagMap.size());
 	TRACE("구축 시간: %d ms\n", elapsed);
 	TRACE("검색 성능: O(log N) - 201개 기준 약 8번 비교\n");

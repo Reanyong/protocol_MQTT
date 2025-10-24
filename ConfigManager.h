@@ -32,15 +32,20 @@ public:
 	// CString GetTagGroup() const;
 	// void SetTagGroup(const CString& tagGroup);
 
-	// 모든 태그 매핑 조회
-	std::map<CString, CString> GetAllTagMappings() const;
-	
-	// ===== Map 기반 빠른 조회 (성능 최적화) =====
-	// Topic → TagMappingInfo 매핑 (O(log N) 검색, 201개 → 약 8번 비교)
+	// ===== Subscribe 태그 매핑 (IFM 모드) =====
+	std::map<CString, CString> GetAllSubTagMappings() const;
 	bool GetTagByTopic(const CString& topic, TagMappingInfo& outInfo) const;
-	void BuildTopicHashMap();  // Map 구축 (LoadConfig 시 자동 호출)
+	void BuildTopicHashMap();
+	bool LoadSubTagMappings();
+	bool SaveSubTagMappings();
 
-	// 태그 매핑 로드/저장
+	// ===== Publish 태그 매핑 (Navifra 모드) =====
+	std::map<CString, CString> GetAllPubTagMappings() const;
+	bool LoadPubTagMappings();
+	bool SavePubTagMappings();
+
+	// ===== 하위 호환성 메서드 (Device 타입에 따라 동작) =====
+	std::map<CString, CString> GetAllTagMappings() const;
 	bool LoadTagMappings();
 	bool SaveTagMappings();
 
@@ -80,9 +85,13 @@ public:
 	void SetSubscribeTopic(const CString& topic);
 	CString GetSubscribeTopic() const;
 
-	// Device 설정 메서드 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
-	void SetDevice(const CString& deviceType);
-	CString GetDevice() const;
+	// Device 타입 설정 메서드
+	void SetDeviceType(const CString& deviceType);
+	CString GetDeviceType() const;
+
+	// Publish 주기 설정 (Navifra 모드 전용, ms 단위)
+	void SetPublishInterval(int interval);
+	int GetPublishInterval() const;
 
 	// Autorun 설정 메서드
 	void SetAutorun(int autorun);
@@ -96,15 +105,19 @@ private:
 	int m_mqttPort;
 	int m_mqttKeepAlive;
 	CString m_subscribeTopic;	// 구독할 토픽 패턴
-	std::map<CString, CString> m_tagMappings;  // 태그명 -> JSONPath 매핑
 
-	// ===== 성능 최적화: Topic → TagMappingInfo Map =====
-	// O(201) 순회 → O(log N) 검색으로 개선 (std::map 사용)
-	// CString은 기본 해시 함수가 없어서 std::map 사용
-	std::map<CString, TagMappingInfo> m_topicToTagMap;
+	// ===== Subscribe 태그 매핑 (IFM 모드) =====
+	std::map<CString, CString> m_subTagMappings;  // 태그명 -> "토픽,JSONPath"
+	std::map<CString, TagMappingInfo> m_topicToTagMap;  // Topic → TagMappingInfo (빠른 검색용)
 
-	// Device 타입 (사용하지 않음 - 모든 데이터에 1 곱하기 적용)
-	CString m_device;
+	// ===== Publish 태그 매핑 (Navifra 모드) =====
+	std::map<CString, CString> m_pubTagMappings;  // 태그명 -> "토픽,JSON구조"
+
+	// Device 타입
+	CString m_deviceType;
+
+	// Publish 주기 (Navifra 모드 전용, ms)
+	int m_publishInterval;
 
 	// Autorun 설정 (0: 자동 시작 안함, 1: 자동 시작)
 	int m_autorun;

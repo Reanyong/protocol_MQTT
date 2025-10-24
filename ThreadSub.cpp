@@ -305,6 +305,39 @@ int CThreadSub::Run()
 		TRACE("EasyView Engine connection failed: %d\n", nResult);
 	}
 
+	// ===== Device Type 체크 =====
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	configManager.LoadConfig();
+
+	CString deviceType = configManager.GetDeviceType();
+	TRACE("Device Type: %s\n", (LPCTSTR)deviceType);
+
+	// Device Type에 따라 분기
+	if (deviceType == _T("IFM")) {
+		TRACE("=== IFM Mode: Subscribe (Receive) ===\n");
+		return RunSubscribeMode();
+	}
+	else if (deviceType == _T("Navifra")) {
+		TRACE("=== Navifra Mode: Publish (Send) ===\n");
+		return RunPublishMode();
+	}
+	else {
+		TRACE("ERROR: Unknown Device Type: %s\n", (LPCTSTR)deviceType);
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			pDlg->AddActivityLog(_T("시스템"), _T("알 수 없는 Device 타입"), ActivityLogItem::LOG_ERROR, deviceType);
+		}
+		return -1;
+	}
+}
+
+int CThreadSub::RunSubscribeMode()
+{
+	TRACE("=== RunSubscribeMode Started ===\n");
+
+	CConfigManager& configManager = CConfigManager::GetInstance();
+
 	// 메시지 큐 생성
 	TRACE("Creating message queue...\n");
 	m_pMessageQueue = new CMqttMessageQueue(5000);
@@ -327,9 +360,6 @@ int CThreadSub::Run()
 	DWORD dwOld = dwCur;
 	int nErrorCode = 1;
 	int nNetworkLoop;
-
-	CConfigManager& configManager = CConfigManager::GetInstance();
-	configManager.LoadConfig();
 
 	// ===== Phase 1: TagInfoCache 초기화 (핵심!) =====
 	TRACE("=== Phase 1: TagInfoCache PreloadAllTags Starting ===\n");
@@ -900,4 +930,285 @@ int CThreadSub::GetTotalProcessedCount() const
 		}
 	}
 	return totalProcessed;
+}
+
+// ===== Navifra 모드: MQTT Publish (송신) =====
+int CThreadSub::RunPublishMode()
+{
+	TRACE("=== RunPublishMode Started ===\n");
+
+	CConfigManager& configManager = CConfigManager::GetInstance();
+
+	// MQTT 설정 로드
+	CString mqttIp = configManager.GetMqttIp();
+	int mqttPort = configManager.GetMqttPort();
+	int mqttKeepAlive = configManager.GetMqttKeepAlive();
+	int publishInterval = configManager.GetPublishInterval();
+
+	TRACE("MQTT Broker: %s:%d\n", (LPCTSTR)mqttIp, mqttPort);
+	TRACE("Publish Interval: %d ms\n", publishInterval);
+
+	// UI에 초기 연결 시도 알림
+	if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+	{
+		CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+		pDlg->AddActivityLog(_T("MQTT"), mqttIp, ActivityLogItem::LOG_CONNECTION, _T("연결중"));
+	}
+
+	// MQTT 클라이언트 ID 생성
+	TCHAR szModulePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, szModulePath, MAX_PATH);
+
+	CString strModulePath(szModulePath);
+	int nPos = strModulePath.ReverseFind(_T('\\'));
+	CString clientId = _T("EVMQTT_Client");
+
+	if (nPos > 0) {
+		CString exeName = strModulePath.Mid(nPos + 1);
+		int dotPos = exeName.ReverseFind(_T('.'));
+		if (dotPos > 0) {
+			exeName = exeName.Left(dotPos);
+		}
+		clientId = exeName + _T("_Client");
+	}
+
+	CT2A clientIdA(clientId);
+	CT2A hostA(mqttIp);
+
+	TRACE("MQTT Client ID: %s\n", (const char*)clientIdA);
+
+	// Mosquitto 초기화
+	mosquitto_lib_init();
+	struct mosquitto* mosq = mosquitto_new(clientIdA, true, NULL);
+
+	if (!mosq) {
+		TRACE("mosquitto structure creation failed\n");
+
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			pDlg->AddActivityLog(_T("MQTT"), _T("초기화 실패"), ActivityLogItem::LOG_ERROR, _T("실패"));
+		}
+
+		mosquitto_lib_cleanup();
+		return -1;
+	}
+
+	// 콜백 설정
+	mosquitto_connect_callback_set(mosq, connect_callback);
+	mosquitto_disconnect_callback_set(mosq, disconnect_callback);
+	mosquitto_user_data_set(mosq, this);
+
+	// MQTT 브로커 연결
+	TRACE("Connecting to MQTT broker: %s:%d\n", (const char*)hostA, mqttPort);
+	if (mosquitto_connect(mosq, hostA, mqttPort, mqttKeepAlive)) {
+		TRACE("MQTT broker connection failed\n");
+
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			pDlg->OnMqttConnectionChanged(false);
+			pDlg->AddActivityLog(_T("MQTT"), _T("연결 실패"), ActivityLogItem::LOG_ERROR, _T("실패"));
+		}
+
+		mosquitto_destroy(mosq);
+		mosquitto_lib_cleanup();
+		return -2;
+	}
+
+	// mosquitto_loop_start() 시작
+	TRACE("Starting Mosquitto background thread...\n");
+	int loopStartResult = mosquitto_loop_start(mosq);
+	if (loopStartResult != MOSQ_ERR_SUCCESS) {
+		TRACE("ERROR: mosquitto_loop_start failed with code: %d\n", loopStartResult);
+
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			pDlg->AddActivityLog(_T("MQTT"), _T("백그라운드 스레드 시작 실패"), ActivityLogItem::LOG_ERROR, _T("실패"));
+		}
+
+		mosquitto_disconnect(mosq);
+		mosquitto_destroy(mosq);
+		mosquitto_lib_cleanup();
+		return -3;
+	}
+
+	TRACE("Mosquitto background thread started successfully\n");
+
+	// PubTagMapping 로드
+	std::map<CString, CString> pubTagMappings = configManager.GetAllPubTagMappings();
+	TRACE("Loaded %d Publish tag mappings\n", pubTagMappings.size());
+
+	if (pubTagMappings.empty()) {
+		TRACE("WARNING: No PubTagMapping found in INI file\n");
+
+		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+		{
+			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+			pDlg->AddActivityLog(_T("시스템"), _T("PubTagMapping이 비어있습니다"), ActivityLogItem::LOG_ERROR, _T("경고"));
+		}
+	}
+
+	// TagCache 초기화 (Publish 모드에서도 태그 정보 필요)
+	TRACE("=== TagInfoCache PreloadAllTags Starting ===\n");
+	DWORD cacheLoadStartTime = GetTickCount();
+
+	g_tagCache.PreloadAllTags(pubTagMappings);
+
+	DWORD cacheLoadTime = GetTickCount() - cacheLoadStartTime;
+	TRACE("=== TagInfoCache PreloadAllTags Completed in %d ms ===\n", cacheLoadTime);
+
+	// UI에 캐시 로딩 완료 알림
+	if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
+	{
+		CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
+		CString cacheMsg;
+		cacheMsg.Format(_T("캐시 로딩 완료: 태그 %d개 (%dms)"),
+			pubTagMappings.size(), cacheLoadTime);
+		pDlg->AddActivityLog(_T("시스템"), cacheMsg, ActivityLogItem::LOG_INFO, _T("준비"));
+	}
+
+	// ===== 메인 Publish 루프 =====
+	TRACE("=== Publish Loop Started ===\n");
+	DWORD dwLastPublish = GetTickCount();
+	int publishCount = 0;
+
+	while (!m_bEndThread)
+	{
+		DWORD dwCur = GetTickCount();
+
+		// Publish 주기 체크
+		if (dwCur - dwLastPublish >= (DWORD)publishInterval)
+		{
+			dwLastPublish = dwCur;
+
+			// PubTagMapping의 각 태그에 대해 처리
+			for (const auto& mapping : pubTagMappings)
+			{
+				const CString& tagName = mapping.first;
+				const CString& tagMapping = mapping.second;
+
+				// 매핑 형식: "토픽,JSON구조"
+				int commaPos = tagMapping.Find(_T(","));
+				if (commaPos <= 0) {
+					TRACE("Invalid PubTagMapping format: %s\n", (LPCTSTR)tagMapping);
+					continue;
+				}
+
+				CString topic = tagMapping.Left(commaPos);
+				CString jsonStructure = tagMapping.Mid(commaPos + 1);
+				topic.Trim();
+				jsonStructure.Trim();
+
+				// EasyView에서 태그 정보 및 값 읽기
+				CTagInfoCache::TagCacheEntry tagEntry;
+				bool cacheHit = g_tagCache.GetCachedTagInfo(tagName, tagEntry);
+
+				if (!cacheHit || !tagEntry.isValid) {
+					TRACE("Failed to get tag info: %s\n", (LPCTSTR)tagName);
+					continue;
+				}
+
+				// 태그 타입별로 값 읽기
+				CString jsonPayload;
+				bool valueRead = false;
+
+				switch (tagEntry.nTagType) {
+				case TYPE_AI:
+				case TYPE_AO:
+				{
+					if (tagEntry.pAiTag) {
+						double aiValue = tagEntry.pAiTag->dData;
+						jsonPayload.Format(_T("{\"tag\":\"%s\",\"type\":\"AI\",\"value\":%.2f}"),
+							tagName, aiValue);
+						valueRead = true;
+					}
+					break;
+				}
+				case TYPE_DI:
+				case TYPE_DO:
+				{
+					if (tagEntry.pDiTag) {
+						int diValue = tagEntry.pDiTag->nData;
+						jsonPayload.Format(_T("{\"tag\":\"%s\",\"type\":\"DI\",\"value\":%d}"),
+							tagName, diValue);
+						valueRead = true;
+					}
+					break;
+				}
+				case TYPE_SI:
+				{
+					if (tagEntry.pSiTag) {
+						// SI 태그는 문자열이므로 별도 처리 필요
+						// TODO: 문자열 읽기 구현
+						jsonPayload.Format(_T("{\"tag\":\"%s\",\"type\":\"SI\",\"value\":\"\"}"),
+							tagName);
+						valueRead = true;
+					}
+					break;
+				}
+				default:
+					TRACE("Unsupported tag type: %d\n", tagEntry.nTagType);
+					break;
+				}
+
+				if (!valueRead) {
+					TRACE("Failed to read tag value: %s\n", (LPCTSTR)tagName);
+					continue;
+				}
+
+				// UTF-8 변환
+				CT2A topicA(topic, CP_UTF8);
+				CT2A jsonPayloadA(jsonPayload, CP_UTF8);
+
+				// MQTT Publish
+				int pubResult = mosquitto_publish(
+					mosq,
+					NULL,  // mid
+					topicA,
+					strlen(jsonPayloadA),
+					jsonPayloadA,
+					0,     // qos
+					false  // retain
+				);
+
+				if (pubResult == MOSQ_ERR_SUCCESS) {
+					publishCount++;
+
+					if (publishCount % 100 == 0) {
+						TRACE("Published %d messages\n", publishCount);
+					}
+				}
+				else {
+					TRACE("Publish failed: topic=%s, error=%d\n", (const char*)topicA, pubResult);
+				}
+			}
+
+			// 5초마다 통계 출력
+			static DWORD dwLastStats = 0;
+			if (dwCur - dwLastStats > 5000) {
+				dwLastStats = dwCur;
+				TRACE("=== Publish Stats: Total=%d ===\n", publishCount);
+			}
+		}
+
+		Sleep(10);  // CPU 사용률 감소
+	}
+
+	// 정리 작업
+	TRACE("Publish loop terminated, starting cleanup\n");
+
+	if (mosq) {
+		TRACE("Stopping Mosquitto background thread...\n");
+		mosquitto_loop_stop(mosq, true);
+		mosquitto_disconnect(mosq);
+		mosquitto_destroy(mosq);
+		TRACE("MQTT connection closed\n");
+	}
+
+	mosquitto_lib_cleanup();
+
+	TRACE("=== RunPublishMode Terminated ===\n");
+	return 0;
 }

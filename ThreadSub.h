@@ -69,6 +69,10 @@ public:
     virtual int Run();
     //}}AFX_VIRTUAL
 
+    // Device Type별 Run 함수
+    int RunSubscribeMode();  // IFM 모드: MQTT Subscribe (수신)
+    int RunPublishMode();    // Navifra 모드: MQTT Publish (송신)
+
 // Implementation
 protected:
 

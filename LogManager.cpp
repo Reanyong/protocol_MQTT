@@ -60,7 +60,7 @@ CString CLogManager::CreateLogFilePath() const
 		exeFileName = strExePath.Mid(nFileNamePos + 1);
 		int nDotPos = exeFileName.ReverseFind('.');
 		if (nDotPos > 0) {
-			exeFileName = exeFileName.Left(nDotPos);  // EVMQTT_D 또는 EVMQTT1 등
+			exeFileName = exeFileName.Left(nDotPos);
 		}
 	}
 	else {
