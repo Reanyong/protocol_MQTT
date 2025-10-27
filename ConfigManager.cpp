@@ -3,15 +3,13 @@
 #include "LogManager.h"
 
 CConfigManager::CConfigManager()
-	: m_parsingInterval(1000) // 기본값 1초
-	// , m_tagGroup(_T(""))
-	, m_mqttIp(_T("127.0.0.1"))   // 기본 IP
-	, m_mqttPort(1883)            // 기본 포트
-	, m_mqttKeepAlive(60)         // 기본 keepalive
-	, m_subscribeTopic(_T("+"))   // 기본값 모든 토픽
-	, m_deviceType(_T("IFM"))     // 기본값 IFM
-	, m_publishInterval(1000)     // 기본값 1000ms
-	, m_autorun(0)                // 기본값 0 (자동 시작 안함)
+	: m_parsingInterval(1000)
+	, m_mqttIp(_T("127.0.0.1"))
+	, m_mqttPort(1883)
+	, m_mqttKeepAlive(60)
+	, m_subscribeTopic(_T("+"))
+	, m_deviceType(_T("IFM"))
+	, m_autorun(0)
 {
 	// INI 파일 경로 설정 (실행 파일과 같은 경로에 저장)
 	m_iniFilePath = GetIniFilePath();
@@ -82,11 +80,8 @@ bool CConfigManager::LoadConfig()
 		m_mqttPort = GetPrivateProfileInt(_T("General"), _T("Port"), 1883, m_iniFilePath);
 		m_mqttKeepAlive = GetPrivateProfileInt(_T("General"), _T("KeepAlive"), 60, m_iniFilePath);
 
-		// Autorun 설정 로드 (기본값 0)
+		// Autorun 설정 로드
 		m_autorun = GetPrivateProfileInt(_T("General"), _T("Autorun"), 0, m_iniFilePath);
-
-		// Publish 주기 로드 (Navifra 모드 전용, 기본값 1000ms)
-		m_publishInterval = GetPrivateProfileInt(_T("General"), _T("PublishInterval"), 1000, m_iniFilePath);
 
 		// Device Type에 따라 태그 매핑 로드
 		if (m_deviceType == _T("IFM")) {
@@ -151,11 +146,6 @@ bool CConfigManager::SaveConfig()
 		strAutorun.Format(_T("%d"), m_autorun);
 		WritePrivateProfileString(_T("General"), _T("Autorun"), strAutorun, m_iniFilePath);
 
-		// Publish 주기 저장
-		CString strPublishInterval;
-		strPublishInterval.Format(_T("%d"), m_publishInterval);
-		WritePrivateProfileString(_T("General"), _T("PublishInterval"), strPublishInterval, m_iniFilePath);
-
 		// Device Type에 따라 태그 매핑 저장
 		if (m_deviceType == _T("IFM")) {
 			result = result && SaveSubTagMappings();
@@ -205,10 +195,22 @@ std::map<CString, CString> CConfigManager::GetAllSubTagMappings() const
 	return m_subTagMappings;
 }
 
+// ===== Subscribe 태그 순서 =====
+const std::vector<CString>& CConfigManager::GetSubTagOrder() const
+{
+	return m_subTagOrder;
+}
+
 // ===== Publish 태그 매핑 =====
 std::map<CString, CString> CConfigManager::GetAllPubTagMappings() const
 {
 	return m_pubTagMappings;
+}
+
+// ===== Publish 태그 순서 =====
+const std::vector<CString>& CConfigManager::GetPubTagOrder() const
+{
+	return m_pubTagOrder;
 }
 
 // ===== 하위 호환성 (기존 코드용) =====
@@ -276,6 +278,7 @@ bool CConfigManager::LoadSubTagMappings()
 
 	try {
 		m_subTagMappings.clear();
+		m_subTagOrder.clear();  // 순서 초기화
 
 		TRACE("=== SubTagMapping (IFM 모드) 로드 시작 ===\n");
 
@@ -302,6 +305,7 @@ bool CConfigManager::LoadSubTagMappings()
 				}
 
 				m_subTagMappings[tagName] = mapping;
+				m_subTagOrder.push_back(tagName);  // INI 파일 순서대로 저장
 				successCount++;
 
 				// 처음 10개와 마지막 10개만 상세 로그
@@ -343,6 +347,7 @@ bool CConfigManager::LoadPubTagMappings()
 {
 	try {
 		m_pubTagMappings.clear();
+		m_pubTagOrder.clear();  // 순서 초기화
 
 		TRACE("=== PubTagMapping (Navifra 모드) 로드 시작 ===\n");
 
@@ -369,6 +374,7 @@ bool CConfigManager::LoadPubTagMappings()
 				}
 
 				m_pubTagMappings[tagName] = mapping;
+				m_pubTagOrder.push_back(tagName);  // INI 파일 순서대로 저장
 				successCount++;
 
 				// 처음 10개와 마지막 10개만 상세 로그
@@ -805,19 +811,7 @@ int CConfigManager::GetAutorun() const
 	return m_autorun;
 }
 
-// Publish 주기 관련 메서드 (Navifra 모드 전용)
-void CConfigManager::SetPublishInterval(int interval)
-{
-	m_publishInterval = interval;
-	TRACE("Publish 주기 설정: %dms\n", interval);
-}
-
-int CConfigManager::GetPublishInterval() const
-{
-	return m_publishInterval;
-}
-
-// ===== Map 기반 빠른 조회 구현 (성능 최적화) =====
+// Map 기반 빠른 조회 구현
 
 void CConfigManager::BuildTopicHashMap()
 {

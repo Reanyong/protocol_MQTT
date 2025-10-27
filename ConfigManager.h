@@ -38,11 +38,13 @@ public:
 	void BuildTopicHashMap();
 	bool LoadSubTagMappings();
 	bool SaveSubTagMappings();
+	const std::vector<CString>& GetSubTagOrder() const;  // INI 순서 유지
 
 	// ===== Publish 태그 매핑 (Navifra 모드) =====
 	std::map<CString, CString> GetAllPubTagMappings() const;
 	bool LoadPubTagMappings();
 	bool SavePubTagMappings();
+	const std::vector<CString>& GetPubTagOrder() const;  // INI 순서 유지
 
 	// ===== 하위 호환성 메서드 (Device 타입에 따라 동작) =====
 	std::map<CString, CString> GetAllTagMappings() const;
@@ -89,10 +91,6 @@ public:
 	void SetDeviceType(const CString& deviceType);
 	CString GetDeviceType() const;
 
-	// Publish 주기 설정 (Navifra 모드 전용, ms 단위)
-	void SetPublishInterval(int interval);
-	int GetPublishInterval() const;
-
 	// Autorun 설정 메서드
 	void SetAutorun(int autorun);
 	int GetAutorun() const;
@@ -109,15 +107,14 @@ private:
 	// ===== Subscribe 태그 매핑 (IFM 모드) =====
 	std::map<CString, CString> m_subTagMappings;  // 태그명 -> "토픽,JSONPath"
 	std::map<CString, TagMappingInfo> m_topicToTagMap;  // Topic → TagMappingInfo (빠른 검색용)
+	std::vector<CString> m_subTagOrder;  // SubTagMapping INI 파일 순서 유지
 
 	// ===== Publish 태그 매핑 (Navifra 모드) =====
 	std::map<CString, CString> m_pubTagMappings;  // 태그명 -> "토픽,JSON구조"
+	std::vector<CString> m_pubTagOrder;  // PubTagMapping INI 파일 순서 유지
 
 	// Device 타입
 	CString m_deviceType;
-
-	// Publish 주기 (Navifra 모드 전용, ms)
-	int m_publishInterval;
 
 	// Autorun 설정 (0: 자동 시작 안함, 1: 자동 시작)
 	int m_autorun;

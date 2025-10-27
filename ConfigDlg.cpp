@@ -14,6 +14,8 @@ CConfigDlg::CConfigDlg(CWnd* pParent /*=nullptr*/)
 	, m_nMqttPort(1883)
 	, m_nMqttKeepAlive(60)
 	, m_nParsingInterval(50)
+	, m_strDeviceType(_T("NONE"))
+	, m_nPublishInterval(1000)
 	, m_pEditCtrl(nullptr)
 	, m_pInlineEdit(nullptr)
 	, m_editItem(-1)
@@ -47,6 +49,9 @@ void CConfigDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Text(pDX, IDC_EDIT_PARSING_INTERVAL, m_nParsingInterval);
 	DDX_Control(pDX, IDC_LIST_TAG_CONFIG, m_listTagMapping);
 	DDX_Control(pDX, IDC_STC_TAG_COUNT, m_staticTagCount);
+	DDX_Control(pDX, IDC_COMBO_DEVICE_TYPE, m_comboDeviceType);
+	DDX_CBString(pDX, IDC_COMBO_DEVICE_TYPE, m_strDeviceType);
+	DDX_Text(pDX, IDC_EDIT_PUBLISH_INTERVAL, m_nPublishInterval);
 }
 
 BEGIN_MESSAGE_MAP(CConfigDlg, CDialogEx)
@@ -65,6 +70,12 @@ BOOL CConfigDlg::OnInitDialog()
 	CDialogEx::OnInitDialog();
 
 	SetWindowText(_T("EVMQTT 설정"));
+
+	// Device Type 콤보박스 초기화
+	m_comboDeviceType.AddString(_T("NONE"));
+	m_comboDeviceType.AddString(_T("IFM"));
+	m_comboDeviceType.AddString(_T("Navifra"));
+	m_comboDeviceType.SetCurSel(0);  // 기본값 NONE
 
 	// 태그 매핑 리스트 초기화
 	InitTagMappingList();
@@ -168,17 +179,45 @@ void CConfigDlg::LoadConfigData()
 	m_nMqttKeepAlive = configManager.GetMqttKeepAlive();
 	m_nParsingInterval = configManager.GetParsingInterval();
 
+	// Device Type 로드
+	m_strDeviceType = configManager.GetDeviceType();
+	if (m_strDeviceType.IsEmpty()) {
+		m_strDeviceType = _T("NONE");
+	}
+
+	// Publish Interval 로드
+	m_nPublishInterval = configManager.GetPublishInterval();
+
 	UpdateData(FALSE);
+
+	// 콤보박스 선택 설정
+	if (m_strDeviceType == _T("IFM")) {
+		m_comboDeviceType.SetCurSel(1);
+	}
+	else if (m_strDeviceType == _T("Navifra")) {
+		m_comboDeviceType.SetCurSel(2);
+	}
+	else {
+		m_comboDeviceType.SetCurSel(0);  // NONE
+	}
 }
 
 void CConfigDlg::SaveConfigData()
 {
+	UpdateData(TRUE);  // UI → 멤버 변수
+
 	CConfigManager& configManager = CConfigManager::GetInstance();
 
 	configManager.SetMqttIp(m_strMqttIP);
 	configManager.SetMqttPort(m_nMqttPort);
 	configManager.SetMqttKeepAlive(m_nMqttKeepAlive);
 	configManager.SetParsingInterval(m_nParsingInterval);
+
+	// Device Type 저장
+	configManager.SetDeviceType(m_strDeviceType);
+
+	// Publish Interval 저장
+	configManager.SetPublishInterval(m_nPublishInterval);
 
 	configManager.SaveConfig();
 }
@@ -202,33 +241,81 @@ void CConfigDlg::UpdateTagMappingList()
 	m_listTagMapping.DeleteAllItems();
 
 	CConfigManager& configManager = CConfigManager::GetInstance();
-	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
 
-	int index = 0;
-	for (const auto& mapping : tagMappings)
-	{
-		const CString& tagName = mapping.first;
-		const CString& tagMapping = mapping.second;
+	// ===== INI 파일 순서 유지하여 표시 =====
+	CString deviceType = configManager.GetDeviceType();
 
-		// 토픽과 JSONPath 분리
-		CString topic, jsonPath;
-		int commaPos = tagMapping.Find(_T(","));
-		if (commaPos > 0)
-		{
-			topic = tagMapping.Left(commaPos);
-			jsonPath = tagMapping.Mid(commaPos + 1);
-			topic.Trim();
-			jsonPath.Trim();
+	std::map<CString, CString> tagMappings;
+	const std::vector<CString>* tagOrder = nullptr;
+
+	if (deviceType == _T("IFM")) {
+		tagMappings = configManager.GetAllSubTagMappings();
+		tagOrder = &configManager.GetSubTagOrder();
+	}
+	else if (deviceType == _T("Navifra")) {
+		tagMappings = configManager.GetAllPubTagMappings();
+		tagOrder = &configManager.GetPubTagOrder();
+	}
+	else {
+		// NONE인 경우 SubTagMapping 표시
+		tagMappings = configManager.GetAllSubTagMappings();
+		tagOrder = &configManager.GetSubTagOrder();
+	}
+
+	// INI 파일 순서대로 표시
+	if (tagOrder && !tagOrder->empty()) {
+		for (const auto& tagName : *tagOrder) {
+			auto it = tagMappings.find(tagName);
+			if (it != tagMappings.end()) {
+				const CString& tagMapping = it->second;
+
+				// 토픽과 JSONPath 분리
+				CString topic, jsonPath;
+				int commaPos = tagMapping.Find(_T(","));
+				if (commaPos > 0)
+				{
+					topic = tagMapping.Left(commaPos);
+					jsonPath = tagMapping.Mid(commaPos + 1);
+					topic.Trim();
+					jsonPath.Trim();
+				}
+				else
+				{
+					topic = _T("+");
+					jsonPath = tagMapping;
+					jsonPath.Trim();
+				}
+
+				AddTagToList(tagName, topic, jsonPath);
+			}
 		}
-		else
+	}
+	else {
+		// 순서 정보가 없으면 map 순서대로 표시 (알파벳순)
+		for (const auto& mapping : tagMappings)
 		{
-			topic = _T("+");
-			jsonPath = tagMapping;
-			jsonPath.Trim();
-		}
+			const CString& tagName = mapping.first;
+			const CString& tagMapping = mapping.second;
 
-		AddTagToList(tagName, topic, jsonPath);
-		index++;
+			// 토픽과 JSONPath 분리
+			CString topic, jsonPath;
+			int commaPos = tagMapping.Find(_T(","));
+			if (commaPos > 0)
+			{
+				topic = tagMapping.Left(commaPos);
+				jsonPath = tagMapping.Mid(commaPos + 1);
+				topic.Trim();
+				jsonPath.Trim();
+			}
+			else
+			{
+				topic = _T("+");
+				jsonPath = tagMapping;
+				jsonPath.Trim();
+			}
+
+			AddTagToList(tagName, topic, jsonPath);
+		}
 	}
 
 	// 빈 행 하나 추가 (새 태그 입력용)
@@ -236,7 +323,7 @@ void CConfigDlg::UpdateTagMappingList()
 	m_listTagMapping.SetItemText(emptyIndex, 1, _T(""));
 	m_listTagMapping.SetItemText(emptyIndex, 2, _T(""));
 
-	TRACE("태그 매핑 리스트 업데이트 완료: %d개 항목\n", m_listTagMapping.GetItemCount());
+	TRACE("태그 매핑 리스트 업데이트 완료: %d개 항목 (INI 순서 유지)\n", m_listTagMapping.GetItemCount());
 }
 
 void CConfigDlg::AddTagToList(const CString& tagName, const CString& topic, const CString& jsonPath)

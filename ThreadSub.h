@@ -73,6 +73,17 @@ public:
     int RunSubscribeMode();  // IFM 모드: MQTT Subscribe (수신)
     int RunPublishMode();    // Navifra 모드: MQTT Publish (송신)
 
+    // 출력 제어 관련 (EasyView Output)
+    HANDLE m_hCtrlQueue;
+    HANDLE m_hCtrlSync;
+    ST_CONTROL_QUEUE* m_pCtrlQueue;
+    SECURITY_DESCRIPTOR* m_psd;
+
+    int CreateOutputMap();
+    void CloseOutputMap();
+    int GetControl(ST_CONTROL2* pCtrl);
+    void ProcessOutput(ST_CONTROL2* pCtrl, struct mosquitto* mosq, const std::map<CString, CString>& pubTagMappings);
+
 // Implementation
 protected:
 

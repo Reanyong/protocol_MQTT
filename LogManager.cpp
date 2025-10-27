@@ -135,10 +135,10 @@ void CLogManager::WriteErrorLog(const CString& logType, const CString& source,
 		}
 
 		// 디버그 출력
-		TRACE("=== ERROR LOG WRITTEN ===\n");
+		/*TRACE("=== ERROR LOG WRITTEN ===\n");
 		TRACE("타입: %s\n", (LPCTSTR)logType);
 		TRACE("소스: %s\n", (LPCTSTR)source);
-		TRACE("메시지: %s\n", (LPCTSTR)errorMessage);
+		TRACE("메시지: %s\n", (LPCTSTR)errorMessage);*/
 		if (!additionalInfo.IsEmpty()) {
 			TRACE("추가정보: %s\n", (LPCTSTR)additionalInfo);
 		}

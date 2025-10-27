@@ -29,11 +29,51 @@ CEVMQTTApp::CEVMQTTApp()
 
 CEVMQTTApp theApp;
 
+// ===== EasyView 프로젝트 이름 전역 변수 =====
+CString g_szProjectName;
+
 
 // CEVMQTTApp 초기화
 
 BOOL CEVMQTTApp::InitInstance()
 {
+	// ===== EasyView 엔진에서 전달된 프로젝트 이름 파싱 =====
+	// 예: EVMQTT_D.exe T_MQTT:engine
+	CString cmdLine = m_lpCmdLine;
+	cmdLine.TrimLeft();
+	cmdLine.TrimRight();
+
+	if (!cmdLine.IsEmpty())
+	{
+		int colonPos = cmdLine.Find(_T(':'));
+		if (colonPos > 0)
+		{
+			// "T_MQTT:engine" → "T_MQTT"
+			g_szProjectName = cmdLine.Left(colonPos);
+		}
+		else
+		{
+			// 콜론이 없으면 전체를 프로젝트 이름으로
+			g_szProjectName = cmdLine;
+		}
+		g_szProjectName.MakeUpper();
+		TRACE("Command line project name: %s\n", (LPCTSTR)g_szProjectName);
+	}
+	else
+	{
+		// 커맨드 라인이 없으면 INI 파일에서 읽기
+		char szBuff[256] = { 0 };
+		char szProjectName[256] = { 0 };
+		EV_GetConfigFile(szBuff);
+		::GetPrivateProfileString(
+			"EasyView", "Project", "", szProjectName,
+			sizeof(szProjectName), szBuff
+		);
+		g_szProjectName = CString(szProjectName);
+		g_szProjectName.MakeUpper();
+		TRACE("INI file project name: %s\n", (LPCTSTR)g_szProjectName);
+	}
+
 	// 중복 실행 방지 (실행 파일명 기반)
 	// EVMQTT1.exe, EVMQTT2.exe, EVMQTT3.exe, EVMQTT4.exe는 각각 독립 실행 가능
 	// 하지만 같은 이름끼리는 중복 실행 불가

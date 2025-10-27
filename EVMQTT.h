@@ -25,3 +25,6 @@ private:
 };
 
 extern CEVMQTTApp theApp;
+
+// ===== EasyView 프로젝트 이름 전역 변수 =====
+extern CString g_szProjectName;

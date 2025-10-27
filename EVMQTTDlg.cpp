@@ -97,7 +97,7 @@ BEGIN_MESSAGE_MAP(CEVMQTTDlg, CDialogEx)
 	ON_MESSAGE(WM_USER + 100, OnUpdateStats)
 	ON_MESSAGE(WM_USER + 102, OnUpdateActivityLog)
 	ON_MESSAGE(WM_USER + 103, OnThreadAutoTerminated)
-	ON_MESSAGE(WM_TRAY_NOTIFICATION, OnTrayNotification)
+	//ON_MESSAGE(WM_TRAY_NOTIFICATION, OnTrayNotification)
 	ON_REGISTERED_MESSAGE(m_wm_EVViewStop, OnEasyViewStop)
 	ON_BN_CLICKED(IDC_BTN_CONFIG, &CEVMQTTDlg::OnBnClickedBtnConfig)
 	ON_BN_CLICKED(IDC_BTN_VIEW_LOG, &CEVMQTTDlg::OnBnClickedBtnViewLog)
@@ -326,7 +326,7 @@ void CEVMQTTDlg::CreateTrayIcon()
 	m_nid.hWnd = this->GetSafeHwnd();
 	m_nid.uID = 1;
 	m_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-	m_nid.uCallbackMessage = WM_TRAY_NOTIFICATION;
+	//m_nid.uCallbackMessage = WM_TRAY_NOTIFICATION;
 	m_nid.hIcon = m_hIcon;
 
 	// 윈도우 타이틀을 툴팁으로 사용

@@ -38,16 +38,20 @@
 #define IDR_TRAY_MENU                   135
 #define ID_TRAY_OPEN                    136
 #define ID_TRAY_EXIT                    137
-#define WM_TRAY_NOTIFICATION            (WM_USER + 200)
 #define IDC_STC_MS                      1021
+#define IDC_STC_MS2                     1022
+#define IDC_COMBO_DEVICE_TYPE           1024
+#define IDC_STC_DEVICE_TYPE             1025
+#define IDC_EDIT_PUBLISH_INTERVAL       1026
+#define IDC_STC_PUBLISH_INTERVAL        1027
 
 // Next default values for new objects
-//
+// 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        138
 #define _APS_NEXT_COMMAND_VALUE         32773
-#define _APS_NEXT_CONTROL_VALUE         1024
+#define _APS_NEXT_CONTROL_VALUE         1028
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

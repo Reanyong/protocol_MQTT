@@ -30,6 +30,11 @@ public:
 	int m_nMqttKeepAlive;
 	int m_nParsingInterval;
 
+	// Device 설정 변수
+	CComboBox m_comboDeviceType;
+	CString m_strDeviceType;
+	int m_nPublishInterval;  // Navifra 모드 전용
+
 	// 태그 매핑 리스트
 	CListCtrl m_listTagMapping;
 
