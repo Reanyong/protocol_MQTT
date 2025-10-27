@@ -186,8 +186,7 @@ void CConfigDlg::LoadConfigData()
 	}
 
 	// Publish Interval 로드
-	m_nPublishInterval = configManager.GetPublishInterval();
-
+	//m_nPublishInterval = configManager.GetPublishInterval();
 	UpdateData(FALSE);
 
 	// 콤보박스 선택 설정
@@ -217,7 +216,7 @@ void CConfigDlg::SaveConfigData()
 	configManager.SetDeviceType(m_strDeviceType);
 
 	// Publish Interval 저장
-	configManager.SetPublishInterval(m_nPublishInterval);
+	//configManager.SetPublishInterval(m_nPublishInterval);
 
 	configManager.SaveConfig();
 }
@@ -242,22 +241,22 @@ void CConfigDlg::UpdateTagMappingList()
 
 	CConfigManager& configManager = CConfigManager::GetInstance();
 
-	// ===== INI 파일 순서 유지하여 표시 =====
+	// ===== INI 파일 순서 유지하여 표시 (대소문자 구분 없음) =====
 	CString deviceType = configManager.GetDeviceType();
 
 	std::map<CString, CString> tagMappings;
 	const std::vector<CString>* tagOrder = nullptr;
 
-	if (deviceType == _T("IFM")) {
+	if (deviceType.CompareNoCase(_T("IFM")) == 0) {
 		tagMappings = configManager.GetAllSubTagMappings();
 		tagOrder = &configManager.GetSubTagOrder();
 	}
-	else if (deviceType == _T("Navifra")) {
+	else if (deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		tagMappings = configManager.GetAllPubTagMappings();
 		tagOrder = &configManager.GetPubTagOrder();
 	}
 	else {
-		// NONE인 경우 SubTagMapping 표시
+		// NONE or default: show SubTagMapping
 		tagMappings = configManager.GetAllSubTagMappings();
 		tagOrder = &configManager.GetSubTagOrder();
 	}

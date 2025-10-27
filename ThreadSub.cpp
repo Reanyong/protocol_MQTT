@@ -62,12 +62,22 @@ CThreadSub::CThreadSub()
 
 CThreadSub::~CThreadSub()
 {
+	TRACE("~CThreadSub() destructor called\n");
+
+	// 워커 스레드 정리 (Subscribe 모드에서만 사용)
 	DestroyWorkerThreads();
 
+	// 메시지 큐 정리 (Subscribe 모드에서만 사용)
 	if (m_pMessageQueue) {
+		TRACE("Deleting message queue in destructor\n");
 		delete m_pMessageQueue;
 		m_pMessageQueue = nullptr;
 	}
+
+	// 출력 제어 정리 (Publish 모드에서만 사용)
+	CloseOutputMap();
+
+	TRACE("~CThreadSub() destructor completed\n");
 }
 
 BOOL CThreadSub::InitInstance()
@@ -316,12 +326,12 @@ int CThreadSub::Run()
 	CString deviceType = configManager.GetDeviceType();
 	TRACE("Device Type: %s\n", (LPCTSTR)deviceType);
 
-	// Device Type에 따라 분기
-	if (deviceType == _T("IFM")) {
+	// Device Type에 따라 분기 (대소문자 구분 없음)
+	if (deviceType.CompareNoCase(_T("IFM")) == 0) {
 		TRACE("IFM Mode: Subscribe\n");
 		return RunSubscribeMode();
 	}
-	else if (deviceType == _T("Navifra")) {
+	else if (deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		TRACE("Navifra Mode: Publish\n");
 		return RunPublishMode();
 	}
@@ -330,7 +340,7 @@ int CThreadSub::Run()
 		if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
 		{
 			CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;
-			pDlg->AddActivityLog(_T("시스템"), _T("알 수 없는 Device 타입"), ActivityLogItem::LOG_ERROR, deviceType);
+			pDlg->AddActivityLog(_T("System"), _T("Unknown Device Type"), ActivityLogItem::LOG_ERROR, deviceType);
 		}
 		return -1;
 	}
@@ -634,22 +644,11 @@ int CThreadSub::RunSubscribeMode()
 	}
 	mosquitto_lib_cleanup();
 
-	// 워커 스레드 종료
-	DestroyWorkerThreads();
-
-	// 메시지 큐 삭제
-	if (m_pMessageQueue) {
-		TRACE("Final message queue cleanup\n");
-		delete m_pMessageQueue;
-		m_pMessageQueue = nullptr;
-		TRACE("Message queue cleanup completed\n");
-	}
-
 	if (mqtt_host) free(mqtt_host);
 	if (mqtt_topic) free(mqtt_topic);
 	if (mqtt_client_id) free(mqtt_client_id);
 
-	TRACE("ThreadSub Terminated\n");
+	TRACE("RunSubscribeMode Terminated\n");
 	return 0;
 }
 
@@ -816,7 +815,13 @@ void CThreadSub::CreateWorkerThreads()
 
 void CThreadSub::DestroyWorkerThreads()
 {
-	TRACE("Worker Thread Termination Started\n");
+	// 워커 스레드가 없으면 아무것도 하지 않음
+	if (m_workerThreads.empty()) {
+		TRACE("No worker threads to destroy\n");
+		return;
+	}
+
+	TRACE("Worker Thread Termination Started (%d threads)\n", m_workerThreads.size());
 
 	// Send shutdown signal to message queue
 	if (m_pMessageQueue) {
@@ -1087,10 +1092,6 @@ int CThreadSub::RunPublishMode()
 
 	// 정리 작업
 	TRACE("Output processing loop terminated, starting cleanup\n");
-
-	// EasyView 출력 제어 Shared Memory 해제
-	CloseOutputMap();
-	TRACE("Output control map closed\n");
 
 	if (mosq) {
 		TRACE("Stopping Mosquitto background thread...\n");

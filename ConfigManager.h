@@ -34,7 +34,7 @@ public:
 
 	// ===== Subscribe 태그 매핑 (IFM 모드) =====
 	std::map<CString, CString> GetAllSubTagMappings() const;
-	bool GetTagByTopic(const CString& topic, TagMappingInfo& outInfo) const;
+	std::vector<TagMappingInfo> GetAllTagsByTopic(const CString& topic) const;  // 중복 토픽 지원
 	void BuildTopicHashMap();
 	bool LoadSubTagMappings();
 	bool SaveSubTagMappings();
@@ -106,7 +106,7 @@ private:
 
 	// ===== Subscribe 태그 매핑 (IFM 모드) =====
 	std::map<CString, CString> m_subTagMappings;  // 태그명 -> "토픽,JSONPath"
-	std::map<CString, TagMappingInfo> m_topicToTagMap;  // Topic → TagMappingInfo (빠른 검색용)
+	std::multimap<CString, TagMappingInfo> m_topicToTagMap;  // Topic → TagMappingInfo (중복 토픽 지원)
 	std::vector<CString> m_subTagOrder;  // SubTagMapping INI 파일 순서 유지
 
 	// ===== Publish 태그 매핑 (Navifra 모드) =====

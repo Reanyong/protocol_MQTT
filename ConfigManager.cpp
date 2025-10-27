@@ -83,15 +83,15 @@ bool CConfigManager::LoadConfig()
 		// Autorun 설정 로드
 		m_autorun = GetPrivateProfileInt(_T("General"), _T("Autorun"), 0, m_iniFilePath);
 
-		// Device Type에 따라 태그 매핑 로드
-		if (m_deviceType == _T("IFM")) {
+		// Device Type에 따라 태그 매핑 로드 (대소문자 구분 없음)
+		if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 			result = result && LoadSubTagMappings();
 		}
-		else if (m_deviceType == _T("Navifra")) {
+		else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 			result = result && LoadPubTagMappings();
 		}
 		else {
-			// 기본적으로 둘 다 로드
+			// Default: load both
 			result = result && LoadSubTagMappings();
 			result = result && LoadPubTagMappings();
 		}
@@ -146,11 +146,11 @@ bool CConfigManager::SaveConfig()
 		strAutorun.Format(_T("%d"), m_autorun);
 		WritePrivateProfileString(_T("General"), _T("Autorun"), strAutorun, m_iniFilePath);
 
-		// Device Type에 따라 태그 매핑 저장
-		if (m_deviceType == _T("IFM")) {
+		// Device Type에 따라 태그 매핑 저장 (대소문자 구분 없음)
+		if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 			result = result && SaveSubTagMappings();
 		}
-		else if (m_deviceType == _T("Navifra")) {
+		else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 			result = result && SavePubTagMappings();
 		}
 		else {
@@ -217,10 +217,10 @@ const std::vector<CString>& CConfigManager::GetPubTagOrder() const
 std::map<CString, CString> CConfigManager::GetAllTagMappings() const
 {
 	// Device Type에 따라 적절한 매핑 반환
-	if (m_deviceType == _T("IFM")) {
+	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		return m_subTagMappings;
 	}
-	else if (m_deviceType == _T("Navifra")) {
+	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		return m_pubTagMappings;
 	}
 	return m_subTagMappings;  // 기본값
@@ -415,10 +415,10 @@ bool CConfigManager::LoadPubTagMappings()
 bool CConfigManager::LoadTagMappings()
 {
 	// Device Type에 따라 적절한 매핑 로드
-	if (m_deviceType == _T("IFM")) {
+	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		return LoadSubTagMappings();
 	}
-	else if (m_deviceType == _T("Navifra")) {
+	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		return LoadPubTagMappings();
 	}
 	return LoadSubTagMappings();  // 기본값
@@ -637,10 +637,10 @@ bool CConfigManager::SavePubTagMappings()
 bool CConfigManager::SaveTagMappings()
 {
 	// Device Type에 따라 적절한 매핑 저장
-	if (m_deviceType == _T("IFM")) {
+	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		return SaveSubTagMappings();
 	}
-	else if (m_deviceType == _T("Navifra")) {
+	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		return SavePubTagMappings();
 	}
 	return SaveSubTagMappings();  // 기본값
@@ -649,11 +649,11 @@ bool CConfigManager::SaveTagMappings()
 void CConfigManager::AddTagMapping(const CString& tagName, const CString& mapping)
 {
 	// Device Type에 따라 적절한 매핑에 추가
-	if (m_deviceType == _T("IFM")) {
+	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		m_subTagMappings[tagName] = mapping;
 		WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
 	}
-	else if (m_deviceType == _T("Navifra")) {
+	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		m_pubTagMappings[tagName] = mapping;
 		WritePrivateProfileString(_T("PubTagMapping"), tagName, mapping, m_iniFilePath);
 	}
@@ -667,11 +667,11 @@ void CConfigManager::AddTagMapping(const CString& tagName, const CString& mappin
 void CConfigManager::SetTagMapping(const CString& tagName, const CString& mapping)
 {
 	// Device Type에 따라 적절한 매핑 설정
-	if (m_deviceType == _T("IFM")) {
+	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		m_subTagMappings[tagName] = mapping;
 		WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
 	}
-	else if (m_deviceType == _T("Navifra")) {
+	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		m_pubTagMappings[tagName] = mapping;
 		WritePrivateProfileString(_T("PubTagMapping"), tagName, mapping, m_iniFilePath);
 	}
@@ -685,14 +685,14 @@ void CConfigManager::SetTagMapping(const CString& tagName, const CString& mappin
 void CConfigManager::RemoveTagMapping(const CString& tagName)
 {
 	// Device Type에 따라 적절한 매핑에서 삭제
-	if (m_deviceType == _T("IFM")) {
+	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		auto it = m_subTagMappings.find(tagName);
 		if (it != m_subTagMappings.end()) {
 			m_subTagMappings.erase(it);
 			WritePrivateProfileString(_T("SubTagMapping"), tagName, NULL, m_iniFilePath);
 		}
 	}
-	else if (m_deviceType == _T("Navifra")) {
+	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		auto it = m_pubTagMappings.find(tagName);
 		if (it != m_pubTagMappings.end()) {
 			m_pubTagMappings.erase(it);
@@ -712,10 +712,10 @@ void CConfigManager::RemoveTagMapping(const CString& tagName)
 bool CConfigManager::HasTagMapping(const CString& tagName) const
 {
 	// Device Type에 따라 적절한 매핑 검색
-	if (m_deviceType == _T("IFM")) {
+	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		return m_subTagMappings.find(tagName) != m_subTagMappings.end();
 	}
-	else if (m_deviceType == _T("Navifra")) {
+	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		return m_pubTagMappings.find(tagName) != m_pubTagMappings.end();
 	}
 	return m_subTagMappings.find(tagName) != m_subTagMappings.end();
@@ -724,13 +724,13 @@ bool CConfigManager::HasTagMapping(const CString& tagName) const
 CString CConfigManager::GetTagMapping(const CString& tagName) const
 {
 	// Device Type에 따라 적절한 매핑 조회
-	if (m_deviceType == _T("IFM")) {
+	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		auto it = m_subTagMappings.find(tagName);
 		if (it != m_subTagMappings.end()) {
 			return it->second;
 		}
 	}
-	else if (m_deviceType == _T("Navifra")) {
+	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		auto it = m_pubTagMappings.find(tagName);
 		if (it != m_pubTagMappings.end()) {
 			return it->second;
@@ -847,11 +847,11 @@ void CConfigManager::BuildTopicHashMap()
 			wildcardCount++;
 		}
 
-	// HashMap에 추가
+	// multimap에 추가 (중복 허용)
 	if (topic != _T("+")) {
-		m_topicToTagMap[topic] = TagMappingInfo(tagName, jsonPath);
+		m_topicToTagMap.insert({topic, TagMappingInfo(tagName, jsonPath)});
 		successCount++;
-		
+
 		// 디버깅: 처음 5개만 출력
 		if (successCount <= 5) {
 			TRACE("  [%d] Map에 추가: Topic='%S' → Tag='%S', JSONPath='%S'\n",
@@ -869,22 +869,57 @@ void CConfigManager::BuildTopicHashMap()
 
 	DWORD elapsed = GetTickCount() - startTime;
 
+	// 중복 토픽 통계 계산
+	int duplicateTopics = successCount - (int)m_topicToTagMap.size();
+
 	TRACE("=== Topic Map 구축 완료 ===\n");
 	TRACE("성공: %d개, 와일드카드: %d개, 전체: %d개\n",
 		successCount, wildcardCount, m_subTagMappings.size());
-	TRACE("Map 크기: %d entries\n", m_topicToTagMap.size());
+	TRACE("Map 크기: %d entries (고유 토픽 수)\n", m_topicToTagMap.size());
+
+	if (duplicateTopics > 0) {
+		TRACE("✅ 중복 토픽: %d개 (multimap으로 모두 처리됨)\n", duplicateTopics);
+
+		// 중복 토픽 목록 출력
+		std::map<CString, int> topicCount;
+		for (const auto& mapping : m_subTagMappings) {
+			const CString& tagMapping = mapping.second;
+			int commaPos = tagMapping.Find(_T(","));
+			if (commaPos > 0) {
+				CString topic = tagMapping.Left(commaPos);
+				topic.Trim();
+				if (topic != _T("+")) {
+					topicCount[topic]++;
+				}
+			}
+		}
+
+		int duplicateCountLimit = 0;
+		for (const auto& tc : topicCount) {
+			if (tc.second > 1 && duplicateCountLimit < 5) {
+				TRACE("  토픽 '%S': %d개 태그 매핑됨\n", (LPCTSTR)tc.first, tc.second);
+				duplicateCountLimit++;
+			}
+		}
+		if (duplicateTopics > 5) {
+			TRACE("  ... 외 %d개 더 있음\n", duplicateTopics - 5);
+		}
+	}
+
 	TRACE("구축 시간: %d ms\n", elapsed);
-	TRACE("검색 성능: O(log N) - 201개 기준 약 8번 비교\n");
+	TRACE("검색 성능: O(log N) - multimap equal_range 사용\n");
 }
 
-bool CConfigManager::GetTagByTopic(const CString& topic, TagMappingInfo& outInfo) const
+std::vector<TagMappingInfo> CConfigManager::GetAllTagsByTopic(const CString& topic) const
 {
-	// O(log N) 검색 (Red-Black Tree)
-	// 201개 기준: log2(201) ≈ 7.65 → 약 8번 비교
-	auto it = m_topicToTagMap.find(topic);
-	if (it != m_topicToTagMap.end()) {
-		outInfo = it->second;
-		return true;
+	std::vector<TagMappingInfo> results;
+
+	// multimap에서 같은 토픽의 모든 매핑 찾기 (O(log N + M), M = 중복 개수)
+	auto range = m_topicToTagMap.equal_range(topic);
+
+	for (auto it = range.first; it != range.second; ++it) {
+		results.push_back(it->second);
 	}
-	return false;
+
+	return results;
 }

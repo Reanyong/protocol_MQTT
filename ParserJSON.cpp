@@ -71,43 +71,41 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 		return false;
 	}
 
-	// ===== Device Type 체크=====
+	// ===== Device Type 체크 (대소문자 구분 없음) =====
 	CConfigManager& configManager = CConfigManager::GetInstance();
 	CString deviceType = configManager.GetDeviceType();
 
-	if (deviceType == _T("IFM")) {
-		// IFM 디바이스 JSON 파싱 (기존 로직)
-		TRACE("IFM 디바이스 파싱 수행: Topic=%s\n", (LPCTSTR)mqttTopic);
+	if (deviceType.CompareNoCase(_T("IFM")) == 0) {
+		// IFM device JSON parsing
+		TRACE("IFM device parsing: Topic=%s\n", (LPCTSTR)mqttTopic);
 	}
-	else if (deviceType == _T("Navifra")) {
-		// Navifra 디바이스 JSON 파싱 (나중에 구현 예정)
-		TRACE("Navifra 디바이스 파싱 (미구현): Topic=%s\n", (LPCTSTR)mqttTopic);
-		// TODO: Navifra용 파싱 로직 추가
-		return false;  // 현재는 미구현이므로 false 반환
+	else if (deviceType.CompareNoCase(_T("Navifra")) == 0) {
+		// Navifra device JSON parsing (not implemented yet)
+		TRACE("Navifra device parsing (not implemented): Topic=%s\n", (LPCTSTR)mqttTopic);
+		// TODO: Add Navifra parsing logic
+		return false;
 	}
 	else {
-		// 알 수 없는 디바이스 타입
-		TRACE("알 수 없는 Device 타입: %s - Device를 입력해주세요\n", (LPCTSTR)deviceType);
+		// Unknown device type
+		TRACE("Unknown Device type: %s - Please set Device type\n", (LPCTSTR)deviceType);
 
-		// 로그 기록
+		// Log error
 		CLogManager& logManager = CLogManager::GetInstance();
 		CString errorMsg;
-		errorMsg.Format(_T("알 수 없는 Device 타입: %s"), deviceType);
-		logManager.WriteErrorLog(_T("Device타입오류"), _T("JSON파싱"),
-			errorMsg, _T("Device를 올바르게 설정해주세요"));
+		errorMsg.Format(_T("Unknown Device type: %s"), deviceType);
+		logManager.WriteErrorLog(_T("DeviceTypeError"), _T("JSONParsing"),
+			errorMsg, _T("Please configure Device type correctly"));
 
 		return false;
 	}
 
-	// ===== 성능 최적화: Map 기반 O(log N) 검색 =====
-	// 기존: 201번 순회 (~100ms)
-	// 개선: Map 검색 (log2(201) ≈ 8번 비교, ~0.01ms)
-	TagMappingInfo tagInfo;
-	
-	// O(log N) 검색으로 태그 정보 조회 (201개 → 8번 비교)
-	if (!configManager.GetTagByTopic(mqttTopic, tagInfo)) {
-		TRACE("토픽에 매핑된 태그 없음: '%S' (Map에 없음!)\n", (LPCTSTR)mqttTopic);
-		
+	// ===== multimap 기반 중복 토픽 지원 =====
+	// 하나의 토픽에 여러 태그 매핑 가능 (예: test → test, test1)
+	std::vector<TagMappingInfo> tagInfos = configManager.GetAllTagsByTopic(mqttTopic);
+
+	if (tagInfos.empty()) {
+		TRACE("토픽에 매핑된 태그 없음: '%S'\n", (LPCTSTR)mqttTopic);
+
 		// 디버깅: Map에 어떤 토픽들이 있는지 출력 (최초 1회만)
 		static bool mapDebugPrinted = false;
 		if (!mapDebugPrinted) {
@@ -115,11 +113,11 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 			TRACE("=== 디버깅: Topic Map 내용 확인 ===\n");
 			std::map<CString, CString> allMappings = configManager.GetAllTagMappings();
 			TRACE("전체 매핑 개수: %d\n", allMappings.size());
-			
+
 			int printCount = 0;
 			for (const auto& m : allMappings) {
 				if (printCount < 5) {  // 처음 5개만 출력
-					TRACE("  [%d] 태그='%S', 매핑='%S'\n", 
+					TRACE("  [%d] 태그='%S', 매핑='%S'\n",
 						printCount + 1, (LPCTSTR)m.first, (LPCTSTR)m.second);
 					printCount++;
 				}
@@ -131,29 +129,41 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 		return false;
 	}
 
-	TRACE("\n--- Map 기반 태그 처리 ---\n");
-	TRACE("토픽: %S\n", (LPCTSTR)mqttTopic);
-	TRACE("태그명: %S\n", (LPCTSTR)tagInfo.tagName);
-	TRACE("JSONPath: %S\n", (LPCTSTR)tagInfo.jsonPath);
+	TRACE("\n--- multimap 기반 태그 처리 (토픽: %S, 매핑: %d개) ---\n",
+		(LPCTSTR)mqttTopic, tagInfos.size());
 
-	// EasyView 태그 존재 여부 확인
-	ST_EV_TAG_INFO evTagInfo;
-	if (EV_GetTagInfo(tagInfo.tagName, &evTagInfo) <= 0) {
-		TRACE("EasyView에서 태그를 찾을 수 없음: %S\n", (LPCTSTR)tagInfo.tagName);
-		return false;
+	// 같은 토픽의 모든 태그 처리
+	bool anySuccess = false;
+	int successCount = 0;
+	int failCount = 0;
+
+	for (const auto& tagInfo : tagInfos) {
+		TRACE("  처리 중 [%d/%d]: 태그='%S', JSONPath='%S'\n",
+			successCount + failCount + 1, tagInfos.size(),
+			(LPCTSTR)tagInfo.tagName, (LPCTSTR)tagInfo.jsonPath);
+
+		// EasyView 태그 존재 여부 확인
+		ST_EV_TAG_INFO evTagInfo;
+		if (EV_GetTagInfo(tagInfo.tagName, &evTagInfo) <= 0) {
+			TRACE("    → EasyView에서 태그를 찾을 수 없음: %S\n", (LPCTSTR)tagInfo.tagName);
+			failCount++;
+			continue;
+		}
+
+		// JSONPath로 값 추출 및 태그에 적용
+		if (ApplyValueToTagOptimized(tagInfo.tagName, tagInfo.jsonPath)) {
+			TRACE("    → 태그 적용 성공: %S\n", (LPCTSTR)tagInfo.tagName);
+			successCount++;
+			anySuccess = true;
+		}
+		else {
+			TRACE("    → 태그 적용 실패: %S\n", (LPCTSTR)tagInfo.tagName);
+			failCount++;
+		}
 	}
 
-	// JSONPath로 값 추출 및 태그에 적용
-	bool success = ApplyValueToTagOptimized(tagInfo.tagName, tagInfo.jsonPath);
-	
-	if (success) {
-		TRACE("태그 적용 성공: %S\n", (LPCTSTR)tagInfo.tagName);
-	}
-	else {
-		TRACE("태그 적용 실패: %S\n", (LPCTSTR)tagInfo.tagName);
-	}
-
-	return success;
+	TRACE("--- 처리 완료: 성공 %d개, 실패 %d개 ---\n", successCount, failCount);
+	return anySuccess;
 }
 
 bool CJsonParser::ApplyValueToTagOptimized(const CString& tagName, const CString& jsonPath) const
