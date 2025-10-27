@@ -1298,7 +1298,7 @@ void CThreadSub::ProcessOutput(ST_CONTROL2* pCtrl, struct mosquitto* mosq, const
 		return;
 	}
 
-	// 매핑 형식: "토픽,JSON양식"
+	// 매핑 형식: "토픽,JSON양식" 또는 "토픽,Station태그명" (Navifra 모드)
 	CString mapping = it->second;
 	int commaPos = mapping.Find(_T(","));
 	if (commaPos <= 0) {
@@ -1314,9 +1314,83 @@ void CThreadSub::ProcessOutput(ST_CONTROL2* pCtrl, struct mosquitto* mosq, const
 	topic.Trim();
 	jsonTemplate.Trim();
 
+	// Device Type 확인
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	CString deviceType = configManager.GetDeviceType();
+
 	CString jsonPayload, logType;
 	CLogManager& logManager = CLogManager::GetInstance();
 
+	// ===== Navifra 모드 전용 처리 =====
+	if (deviceType.CompareNoCase(_T("Navifra")) == 0)
+	{
+		// jsonTemplate은 Station 태그명
+		CString stationTagName = jsonTemplate;
+
+		// DI/DO 출력만 처리 (status 전송용)
+		if (pCtrlCommon->nTagType == TYPE_DI || pCtrlCommon->nTagType == TYPE_DO)
+		{
+			int statusValue = pCtrlDo->nOn;
+			CString statusStr = (statusValue != 0) ? _T("true") : _T("false");
+
+			// Station 태그(AI)에서 값 읽기
+			ST_EV_TAG_INFO stationTagInfo;
+			int tagResult = EV_GetTagInfo(stationTagName, &stationTagInfo);
+			
+			if (tagResult <= 0)
+			{
+				CString logMsg;
+				logMsg.Format(_T("Tag: %s, Station Tag not found: %s"), tagName, stationTagName);
+				logManager.WriteErrorLog(_T("OUTPUT_ERROR"), _T("ProcessOutput"), logMsg, _T("Station 태그 없음"));
+				return;
+			}
+
+			// Station 값 읽기 (AI 타입만 지원)
+			int stationValue = 0;
+			if (stationTagInfo.nTagType == TYPE_AI || stationTagInfo.nTagType == TYPE_AO)
+			{
+				double aiValue = 0.0;
+				int result = EV_GetAiData(stationTagInfo.nStnPos, stationTagInfo.nTagPos, &aiValue);
+				if (result > 0)
+				{
+					stationValue = (int)aiValue;
+				}
+				else
+				{
+					CString logMsg;
+					logMsg.Format(_T("Tag: %s, Failed to read Station Tag: %s"), tagName, stationTagName);
+					logManager.WriteErrorLog(_T("OUTPUT_ERROR"), _T("ProcessOutput"), logMsg, _T("Station 값 읽기 실패"));
+					return;
+				}
+			}
+			else
+			{
+				CString logMsg;
+				logMsg.Format(_T("Tag: %s, Station Tag must be AI/AO type: %s"), tagName, stationTagName);
+				logManager.WriteErrorLog(_T("OUTPUT_ERROR"), _T("ProcessOutput"), logMsg, _T("Station 태그 타입 오류"));
+				return;
+			}
+
+			// Navifra JSON 생성
+			jsonPayload.Format(_T("{\"action\":\"complete\",\"station\":%d,\"status\":%s}"),
+				stationValue, statusStr);
+
+			CString logMsg;
+			logMsg.Format(_T("Tag: %s, Status: %s, Station: %d (from %s)"),
+				tagName, statusStr, stationValue, stationTagName);
+			logManager.WriteErrorLog(_T("OUTPUT_NAVIFRA"), _T("ProcessOutput"), logMsg, topic);
+		}
+		else
+		{
+			CString logMsg;
+			logMsg.Format(_T("Tag: %s, Navifra mode only supports DI/DO output"), tagName);
+			logManager.WriteErrorLog(_T("OUTPUT_ERROR"), _T("ProcessOutput"), logMsg, _T("지원되지 않는 태그 타입"));
+			return;
+		}
+	}
+	// ===== 기존 모드 (IFM 등) 처리 =====
+	else
+	{
 	// 태그 타입별 처리 (AI==AO, DI==DO)
 	if (pCtrlCommon->nTagType == TYPE_AI || pCtrlCommon->nTagType == TYPE_AO)
 	{
@@ -1374,8 +1448,9 @@ void CThreadSub::ProcessOutput(ST_CONTROL2* pCtrl, struct mosquitto* mosq, const
 		logManager.WriteErrorLog(_T("OUTPUT_ERROR"), _T("ProcessOutput"), logMsg, _T("지원되지 않는 태그 타입"));
 		return;
 	}
+	} // else (기존 모드 처리 끝)
 
-	// MQTT Publish
+	// ===== MQTT Publish (공통) =====
 	CT2A topicA(topic, CP_UTF8);
 	CT2A payloadA(jsonPayload, CP_UTF8);
 

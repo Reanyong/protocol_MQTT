@@ -83,18 +83,9 @@ bool CConfigManager::LoadConfig()
 		// Autorun 설정 로드
 		m_autorun = GetPrivateProfileInt(_T("General"), _T("Autorun"), 0, m_iniFilePath);
 
-		// Device Type에 따라 태그 매핑 로드 (대소문자 구분 없음)
-		if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
-			result = result && LoadSubTagMappings();
-		}
-		else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
-			result = result && LoadPubTagMappings();
-		}
-		else {
-			// Default: load both
-			result = result && LoadSubTagMappings();
-			result = result && LoadPubTagMappings();
-		}
+		// 항상 두 섹션 모두 로드 (UI에서 Device Type 전환 가능하도록)
+		result = result && LoadSubTagMappings();
+		result = result && LoadPubTagMappings();
 
 		// ===== HashMap 구축 (성능 최적화) =====
 		if (result) {

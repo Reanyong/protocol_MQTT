@@ -15,7 +15,6 @@ CConfigDlg::CConfigDlg(CWnd* pParent /*=nullptr*/)
 	, m_nMqttKeepAlive(60)
 	, m_nParsingInterval(50)
 	, m_strDeviceType(_T("NONE"))
-	, m_nPublishInterval(1000)
 	, m_pEditCtrl(nullptr)
 	, m_pInlineEdit(nullptr)
 	, m_editItem(-1)
@@ -51,7 +50,6 @@ void CConfigDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STC_TAG_COUNT, m_staticTagCount);
 	DDX_Control(pDX, IDC_COMBO_DEVICE_TYPE, m_comboDeviceType);
 	DDX_CBString(pDX, IDC_COMBO_DEVICE_TYPE, m_strDeviceType);
-	DDX_Text(pDX, IDC_EDIT_PUBLISH_INTERVAL, m_nPublishInterval);
 }
 
 BEGIN_MESSAGE_MAP(CConfigDlg, CDialogEx)
@@ -61,6 +59,7 @@ BEGIN_MESSAGE_MAP(CConfigDlg, CDialogEx)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST_TAG_CONFIG, &CConfigDlg::OnLvnItemchangedListTagMapping)
 	ON_NOTIFY(NM_CLICK, IDC_LIST_TAG_CONFIG, &CConfigDlg::OnNMClickListTagMapping)
 	ON_NOTIFY(LVN_ENDLABELEDIT, IDC_LIST_TAG_CONFIG, &CConfigDlg::OnLvnEndlabeleditListTagMapping)
+	ON_CBN_SELCHANGE(IDC_COMBO_DEVICE_TYPE, &CConfigDlg::OnCbnSelchangeComboDeviceType)
 END_MESSAGE_MAP()
 
 // CConfigDlg 메시지 처리기
@@ -82,6 +81,21 @@ BOOL CConfigDlg::OnInitDialog()
 
 	// 설정 데이터 로드
 	LoadConfigData();
+
+	// Device Type에 맞게 컬럼 헤더 설정
+	LVCOLUMN col;
+	col.mask = LVCF_TEXT;
+
+	if (m_strDeviceType.CompareNoCase(_T("Navifra")) == 0) {
+		// Navifra 모드: 태그명 | 토픽 | Station 태그명
+		CString colText = _T("Station 태그명");
+		col.pszText = colText.GetBuffer();
+		m_listTagMapping.SetColumn(2, &col);
+		colText.ReleaseBuffer();
+	}
+	else {
+		// IFM/NONE 모드: 태그명 | 토픽 | JSONPath (이미 설정됨)
+	}
 
 	// 태그 매핑 데이터 표시
 	UpdateTagMappingList();
@@ -185,8 +199,6 @@ void CConfigDlg::LoadConfigData()
 		m_strDeviceType = _T("NONE");
 	}
 
-	// Publish Interval 로드
-	//m_nPublishInterval = configManager.GetPublishInterval();
 	UpdateData(FALSE);
 
 	// 콤보박스 선택 설정
@@ -214,9 +226,6 @@ void CConfigDlg::SaveConfigData()
 
 	// Device Type 저장
 	configManager.SetDeviceType(m_strDeviceType);
-
-	// Publish Interval 저장
-	//configManager.SetPublishInterval(m_nPublishInterval);
 
 	configManager.SaveConfig();
 }
@@ -589,10 +598,15 @@ bool CConfigDlg::ValidateTagRow(int index, CString& tagName, CString& topic, CSt
 		return false;
 	}
 
-	// JSONPath가 비어있으면 유효하지 않음
+	// 3번째 컬럼이 비어있으면 유효하지 않음
 	if (jsonPath.IsEmpty())
 	{
-		AfxMessageBox(_T("JSONPath를 입력해주세요."));
+		if (m_strDeviceType.CompareNoCase(_T("Navifra")) == 0) {
+			AfxMessageBox(_T("Station 태그명을 입력해주세요."));
+		}
+		else {
+			AfxMessageBox(_T("JSONPath를 입력해주세요."));
+		}
 		return false;
 	}
 
@@ -610,11 +624,22 @@ bool CConfigDlg::ValidateTagRow(int index, CString& tagName, CString& topic, CSt
 		return false;
 	}
 
-	// JSONPath 유효성 검사
-	if (!IsValidJsonPath(jsonPath))
-	{
-		AfxMessageBox(_T("유효하지 않은 JSONPath입니다."));
-		return false;
+	// 3번째 컬럼 유효성 검사 (Device Type에 따라 다름)
+	if (m_strDeviceType.CompareNoCase(_T("Navifra")) == 0) {
+		// Navifra 모드: Station 태그명 검사 (태그명 규칙과 동일)
+		if (!IsValidTagName(jsonPath))
+		{
+			AfxMessageBox(_T("유효하지 않은 Station 태그명입니다."));
+			return false;
+		}
+	}
+	else {
+		// IFM/NONE 모드: JSONPath 검사
+		if (!IsValidJsonPath(jsonPath))
+		{
+			AfxMessageBox(_T("유효하지 않은 JSONPath입니다."));
+			return false;
+		}
 	}
 
 	return true;
@@ -763,8 +788,18 @@ void CConfigDlg::EndEditing(bool save)
 				m_listTagMapping.SetItemText(m_editItem, 1, topic);
 			}
 
-			// 유효성 검사
-			if (IsValidTagName(tagName) && IsValidJsonPath(jsonPath))
+			// 유효성 검사 (Device Type에 따라 다름)
+			bool isValid = false;
+			if (m_strDeviceType.CompareNoCase(_T("Navifra")) == 0) {
+				// Navifra 모드: 태그명과 Station 태그명 검사
+				isValid = IsValidTagName(tagName) && IsValidTagName(jsonPath);
+			}
+			else {
+				// IFM/NONE 모드: 태그명과 JSONPath 검사
+				isValid = IsValidTagName(tagName) && IsValidJsonPath(jsonPath);
+			}
+
+			if (isValid)
 			{
 				// 기존 태그인지 확인 (첫 번째 컬럼 변경 시)
 				if (m_editSubItem == 0)
@@ -800,9 +835,21 @@ void CConfigDlg::EndEditing(bool save)
 				{
 					AfxMessageBox(_T("유효하지 않은 태그명입니다. (영문자, 숫자, 언더스코어만 허용)"));
 				}
-				else if (!IsValidJsonPath(jsonPath))
+				else if (m_strDeviceType.CompareNoCase(_T("Navifra")) == 0)
 				{
-					AfxMessageBox(_T("유효하지 않은 JSONPath입니다. ($나 /로 시작해야 합니다)"));
+					// Navifra 모드: Station 태그명 검사
+					if (!IsValidTagName(jsonPath))
+					{
+						AfxMessageBox(_T("유효하지 않은 Station 태그명입니다. (영문자, 숫자, 언더스코어만 허용)"));
+					}
+				}
+				else
+				{
+					// IFM/NONE 모드: JSONPath 검사
+					if (!IsValidJsonPath(jsonPath))
+					{
+						AfxMessageBox(_T("유효하지 않은 JSONPath입니다. ($나 /로 시작해야 합니다)"));
+					}
 				}
 			}
 		}
@@ -891,4 +938,48 @@ void CConfigDlg::DisplayTagCount()
 	m_staticTagCount.SetWindowText(countText);
 	
 	TRACE("태그 개수 표시: %d개\n", tagCount);
+}
+
+void CConfigDlg::OnCbnSelchangeComboDeviceType()
+{
+	// Device Type이 변경되었을 때 컬럼 헤더와 데이터 모두 변경
+	int selIndex = m_comboDeviceType.GetCurSel();
+	if (selIndex < 0) return;
+
+	CString newDeviceType;
+	m_comboDeviceType.GetLBText(selIndex, newDeviceType);
+
+	TRACE("Device Type 변경: %s\n", (LPCTSTR)newDeviceType);
+
+	// ConfigManager에 Device Type 임시 설정 (저장은 확인 버튼 누를 때)
+	m_strDeviceType = newDeviceType;
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	configManager.SetDeviceType(newDeviceType);
+
+	// 컬럼 헤더 변경
+	LVCOLUMN col;
+	col.mask = LVCF_TEXT;
+
+	if (newDeviceType.CompareNoCase(_T("Navifra")) == 0) {
+		// Navifra 모드: 태그명 | 토픽 | Station 태그명
+		CString colText = _T("Station 태그명");
+		col.pszText = colText.GetBuffer();
+		m_listTagMapping.SetColumn(2, &col);
+		colText.ReleaseBuffer();
+	}
+	else {
+		// IFM/NONE 모드: 태그명 | 토픽 | JSONPath
+		CString colText = _T("JSONPath");
+		col.pszText = colText.GetBuffer();
+		m_listTagMapping.SetColumn(2, &col);
+		colText.ReleaseBuffer();
+	}
+
+	// 해당 Device Type에 맞는 데이터 다시 로드
+	UpdateTagMappingList();
+	
+	// 태그 개수 업데이트
+	DisplayTagCount();
+	
+	TRACE("Device Type 변경 완료: 컬럼 헤더 + 데이터 로드\n");
 }

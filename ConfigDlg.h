@@ -33,7 +33,6 @@ public:
 	// Device 설정 변수
 	CComboBox m_comboDeviceType;
 	CString m_strDeviceType;
-	int m_nPublishInterval;  // Navifra 모드 전용
 
 	// 태그 매핑 리스트
 	CListCtrl m_listTagMapping;
@@ -52,6 +51,9 @@ public:
 	afx_msg void OnLvnItemchangedListTagMapping(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnNMClickListTagMapping(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnLvnEndlabeleditListTagMapping(NMHDR* pNMHDR, LRESULT* pResult);
+	
+	// Device Type 콤보박스 이벤트 핸들러
+	afx_msg void OnCbnSelchangeComboDeviceType();
 
 private:
 	// 내부 함수

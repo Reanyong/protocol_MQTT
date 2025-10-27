@@ -39,7 +39,6 @@
 #define ID_TRAY_OPEN                    136
 #define ID_TRAY_EXIT                    137
 #define IDC_STC_MS                      1021
-#define IDC_STC_MS2                     1022
 #define IDC_COMBO_DEVICE_TYPE           1024
 #define IDC_STC_DEVICE_TYPE             1025
 #define IDC_EDIT_PUBLISH_INTERVAL       1026
