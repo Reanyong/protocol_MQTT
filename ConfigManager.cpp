@@ -272,6 +272,11 @@ bool CConfigManager::LoadSubTagMappings()
 		m_subTagOrder.clear();  // 순서 초기화
 
 		TRACE("=== SubTagMapping (IFM 모드) 로드 시작 ===\n");
+		TRACE("INI 파일 경로: %s\n", (LPCTSTR)m_iniFilePath);
+		
+		// INI 파일 캐시 강제 새로고침
+		WritePrivateProfileString(NULL, NULL, NULL, m_iniFilePath);
+		TRACE("INI 파일 캐시 새로고침 완료\n");
 
 		// 스마트한 INI 섹션 읽기
 		std::vector<CString> tagLines;
@@ -341,15 +346,149 @@ bool CConfigManager::LoadPubTagMappings()
 		m_pubTagOrder.clear();  // 순서 초기화
 
 		TRACE("=== PubTagMapping (Navifra 모드) 로드 시작 ===\n");
+		TRACE("INI 파일 경로: %s\n", (LPCTSTR)m_iniFilePath);
+		
+		// INI 파일 캐시 강제 새로고침
+		WritePrivateProfileString(NULL, NULL, NULL, m_iniFilePath);
+		TRACE("INI 파일 캐시 새로고침 완료\n");
+
+		// 디버그 로그 파일 생성 (다른 PC에서 확인용)
+		CString logPath = m_iniFilePath;
+		logPath.Replace(_T("_Config.ini"), _T("_LoadDebug.txt"));
+		FILE* debugLog = nullptr;
+		_tfopen_s(&debugLog, logPath, _T("w"));
+		if (debugLog) {
+			_ftprintf(debugLog, _T("=== PubTagMapping 로드 디버그 ===\n"));
+			_ftprintf(debugLog, _T("INI 경로: %s\n"), (LPCTSTR)m_iniFilePath);
+		}
+
+		// 파일 존재 확인
+		DWORD fileAttr = GetFileAttributes(m_iniFilePath);
+		if (fileAttr == INVALID_FILE_ATTRIBUTES) {
+			TRACE("!!! INI 파일이 존재하지 않음 !!!\n");
+			TRACE("에러 코드: %d\n", GetLastError());
+			if (debugLog) {
+				_ftprintf(debugLog, _T("ERROR: INI 파일이 존재하지 않음 (에러: %d)\n"), GetLastError());
+				fclose(debugLog);
+			}
+			return false;
+		}
+		TRACE("INI 파일 존재 확인 OK (속성: 0x%X)\n", fileAttr);
+		if (debugLog) {
+			_ftprintf(debugLog, _T("INI 파일 존재 OK (속성: 0x%X)\n"), fileAttr);
+		}
+
+		// INI 파일 내용 전체 덤프 (디버깅용)
+		if (debugLog) {
+			_ftprintf(debugLog, _T("\n=== INI 파일 내용 확인 ===\n"));
+			
+			// 모든 섹션 이름 가져오기
+			TCHAR sectionBuffer[8192] = { 0 };
+			DWORD sectionRead = GetPrivateProfileSectionNames(sectionBuffer, 8192, m_iniFilePath);
+			
+			if (sectionRead > 0) {
+				_ftprintf(debugLog, _T("발견된 섹션들:\n"));
+				TCHAR* pSection = sectionBuffer;
+				while (*pSection) {
+					_ftprintf(debugLog, _T("  [%s]\n"), pSection);
+					pSection += _tcslen(pSection) + 1;
+				}
+			}
+			else {
+				_ftprintf(debugLog, _T("섹션 이름 읽기 실패 (에러: %d)\n"), GetLastError());
+			}
+			
+			// INI 파일 직접 읽기 (인코딩 확인용)
+			_ftprintf(debugLog, _T("\n=== INI 파일 직접 읽기 (Raw) ===\n"));
+			FILE* iniFile = nullptr;
+			_tfopen_s(&iniFile, m_iniFilePath, _T("rb"));
+			if (iniFile) {
+				// 파일 크기 확인
+				fseek(iniFile, 0, SEEK_END);
+				long fileSize = ftell(iniFile);
+				fseek(iniFile, 0, SEEK_SET);
+				
+				_ftprintf(debugLog, _T("파일 크기: %ld bytes\n"), fileSize);
+				
+				// BOM 확인
+				unsigned char bom[3] = { 0 };
+				fread(bom, 1, 3, iniFile);
+				fseek(iniFile, 0, SEEK_SET);
+				
+				if (bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
+					_ftprintf(debugLog, _T("인코딩: UTF-8 with BOM\n"));
+				}
+				else if (bom[0] == 0xFF && bom[1] == 0xFE) {
+					_ftprintf(debugLog, _T("인코딩: UTF-16 LE\n"));
+				}
+				else if (bom[0] == 0xFE && bom[1] == 0xFF) {
+					_ftprintf(debugLog, _T("인코딩: UTF-16 BE\n"));
+				}
+				else {
+					_ftprintf(debugLog, _T("인코딩: ANSI 또는 UTF-8 without BOM\n"));
+				}
+				
+				// 처음 1000바이트 읽기
+				char rawBuffer[1001] = { 0 };
+				size_t readBytes = fread(rawBuffer, 1, 1000, iniFile);
+				fclose(iniFile);
+				
+				_ftprintf(debugLog, _T("\n처음 1000 바이트 내용:\n"));
+				_ftprintf(debugLog, _T("---BEGIN---\n"));
+				
+				// ANSI로 변환하여 출력
+				#ifdef UNICODE
+				wchar_t wideBuffer[1001] = { 0 };
+				MultiByteToWideChar(CP_ACP, 0, rawBuffer, -1, wideBuffer, 1001);
+				_ftprintf(debugLog, _T("%s"), wideBuffer);
+				#else
+				_ftprintf(debugLog, _T("%s"), rawBuffer);
+				#endif
+				
+				_ftprintf(debugLog, _T("\n---END---\n"));
+				
+				// PubTagMapping 섹션 찾기
+				if (strstr(rawBuffer, "[PubTagMapping]") || strstr(rawBuffer, "[PUBTAGMAPPING]")) {
+					_ftprintf(debugLog, _T("\n✓ [PubTagMapping] 섹션이 파일에 존재함!\n"));
+				}
+				else {
+					_ftprintf(debugLog, _T("\n✗ [PubTagMapping] 섹션을 파일에서 찾을 수 없음\n"));
+					_ftprintf(debugLog, _T("   → INI 파일이 너무 크거나 섹션이 1000바이트 이후에 있을 수 있음\n"));
+				}
+			}
+			else {
+				_ftprintf(debugLog, _T("INI 파일 직접 열기 실패\n"));
+			}
+		}
 
 		// 스마트한 INI 섹션 읽기
 		std::vector<CString> tagLines;
 		if (!ReadIniSectionSmart(_T("PubTagMapping"), tagLines)) {
-			TRACE("PubTagMapping 섹션 읽기 실패\n");
+			TRACE("!!! PubTagMapping 섹션 읽기 실패 !!!\n");
+			TRACE("힌트: INI 파일에 [PubTagMapping] 섹션이 있는지 확인하세요.\n");
+			TRACE("현재 Device 설정: %s\n", (LPCTSTR)m_deviceType);
+			
+			if (debugLog) {
+				_ftprintf(debugLog, _T("\nERROR: PubTagMapping 섹션 읽기 실패\n"));
+				_ftprintf(debugLog, _T("원인:\n"));
+				_ftprintf(debugLog, _T("  1. INI 파일에 [PubTagMapping] 섹션이 없음\n"));
+				_ftprintf(debugLog, _T("  2. 섹션이 비어있음\n"));
+				_ftprintf(debugLog, _T("  3. INI 파일 인코딩 문제 (UTF-8 BOM 권장)\n"));
+				_ftprintf(debugLog, _T("\n해결 방법:\n"));
+				_ftprintf(debugLog, _T("  1. INI 파일을 열어 [PubTagMapping] 섹션 추가\n"));
+				_ftprintf(debugLog, _T("  2. 예시:\n"));
+				_ftprintf(debugLog, _T("     [PubTagMapping]\n"));
+				_ftprintf(debugLog, _T("     tag1=topic1,/path/to/data\n"));
+				_ftprintf(debugLog, _T("     tag2=topic2,/path/to/value\n"));
+				fclose(debugLog);
+			}
 			return false;
 		}
 
 		TRACE("읽어온 라인 수: %d\n", tagLines.size());
+		if (debugLog) {
+			_ftprintf(debugLog, _T("\n읽어온 라인 수: %d\n"), tagLines.size());
+		}
 
 		// 각 라인 파싱
 		int successCount = 0;
@@ -372,16 +511,31 @@ bool CConfigManager::LoadPubTagMappings()
 				if (successCount <= 10 || successCount > (int)tagLines.size() - 10) {
 					TRACE("태그[%03d]: %s -> %s\n", successCount,
 						(LPCTSTR)tagName, (LPCTSTR)mapping);
+					if (debugLog) {
+						_ftprintf(debugLog, _T("태그[%03d]: %s -> %s\n"), successCount,
+							(LPCTSTR)tagName, (LPCTSTR)mapping);
+					}
 				}
 			}
 			else {
 				skipCount++;
+				if (debugLog && skipCount <= 10) {
+					_ftprintf(debugLog, _T("파싱 실패 라인: %s\n"), (LPCTSTR)line);
+				}
 			}
 		}
 
 		TRACE("=== PubTagMapping 로드 완료 ===\n");
 		TRACE("성공: %d개, 건너뜀: %d개, 전체: %d개\n",
 			successCount, skipCount, tagLines.size());
+
+		if (debugLog) {
+			_ftprintf(debugLog, _T("\n=== 로드 완료 ===\n"));
+			_ftprintf(debugLog, _T("성공: %d개, 건너뜀: %d개, 전체: %d개\n"),
+				successCount, skipCount, tagLines.size());
+			_ftprintf(debugLog, _T("반환값: %s\n"), (successCount > 0) ? _T("true") : _T("false"));
+			fclose(debugLog);
+		}
 
 		// 메모리 사용량 추정
 		size_t estimatedMemory = 0;
@@ -419,10 +573,29 @@ bool CConfigManager::ReadIniSectionSmart(const CString& sectionName, std::vector
 {
 	lines.clear();
 
+	// 섹션 존재 여부 확인 (더미 키로 테스트)
+	TCHAR testBuffer[4] = { 0 };
+	DWORD testRead = GetPrivateProfileSection(sectionName, testBuffer, 4, m_iniFilePath);
+	
+	if (testRead == 0) {
+		TRACE("경고: [%s] 섹션이 INI 파일에 존재하지 않거나 비어있음\n", (LPCTSTR)sectionName);
+		TRACE("INI 경로: %s\n", (LPCTSTR)m_iniFilePath);
+		
+		// 섹션 존재 여부를 더 정확하게 확인
+		// GetPrivateProfileString으로 섹션 내 임의 키 읽기 시도
+		TCHAR dummyValue[16] = { 0 };
+		GetPrivateProfileString(sectionName, _T("_dummy_"), _T("_not_found_"), dummyValue, 16, m_iniFilePath);
+		
+		if (_tcscmp(dummyValue, _T("_not_found_")) == 0) {
+			TRACE("확인: [%s] 섹션이 실제로 존재하지 않음\n", (LPCTSTR)sectionName);
+			return false;
+		}
+	}
+
 	DWORD initialSize = GetOptimalBufferSize(sectionName);
 	TRACE("초기 버퍼 크기: %d KB\n", initialSize / 1024);
 
-	// 2단계: 동적 버퍼로 읽기 시도
+	// 동적 버퍼로 읽기 시도
 	std::vector<TCHAR> buffer;
 	DWORD actualRead = 0;
 	bool success = false;
@@ -467,6 +640,12 @@ bool CConfigManager::ReadIniSectionSmart(const CString& sectionName, std::vector
 		return false;
 	}
 
+	// actualRead가 0이면 섹션이 비어있음
+	if (actualRead == 0) {
+		TRACE("경고: [%s] 섹션이 비어있음 (actualRead = 0)\n", (LPCTSTR)sectionName);
+		return false;
+	}
+
 	if (actualRead > 0) {
 		TCHAR* p = buffer.data();
 		int lineCount = 0;
@@ -481,6 +660,12 @@ bool CConfigManager::ReadIniSectionSmart(const CString& sectionName, std::vector
 		}
 
 		TRACE("파싱된 라인 수: %d\n", lineCount);
+		
+		// 라인이 하나도 없으면 실패로 처리
+		if (lineCount == 0) {
+			TRACE("경고: [%s] 섹션에서 유효한 라인을 찾지 못함\n", (LPCTSTR)sectionName);
+			return false;
+		}
 	}
 
 	return true;
@@ -657,18 +842,28 @@ void CConfigManager::AddTagMapping(const CString& tagName, const CString& mappin
 
 void CConfigManager::SetTagMapping(const CString& tagName, const CString& mapping)
 {
+	TRACE("=== SetTagMapping 호출 ===\n");
+	TRACE("Device Type: %s\n", (LPCTSTR)m_deviceType);
+	TRACE("INI 경로: %s\n", (LPCTSTR)m_iniFilePath);
+	TRACE("태그: %s -> %s\n", (LPCTSTR)tagName, (LPCTSTR)mapping);
+
 	// Device Type에 따라 적절한 매핑 설정
+	BOOL writeResult = FALSE;
 	if (m_deviceType.CompareNoCase(_T("IFM")) == 0) {
 		m_subTagMappings[tagName] = mapping;
-		WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
+		writeResult = WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
+		TRACE("SubTagMapping 저장 결과: %s\n", writeResult ? _T("성공") : _T("실패"));
 	}
 	else if (m_deviceType.CompareNoCase(_T("Navifra")) == 0) {
 		m_pubTagMappings[tagName] = mapping;
-		WritePrivateProfileString(_T("PubTagMapping"), tagName, mapping, m_iniFilePath);
+		writeResult = WritePrivateProfileString(_T("PubTagMapping"), tagName, mapping, m_iniFilePath);
+		TRACE("PubTagMapping 저장 결과: %s (에러코드: %d)\n",
+			writeResult ? _T("성공") : _T("실패"), GetLastError());
 	}
 	else {
 		m_subTagMappings[tagName] = mapping;
-		WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
+		writeResult = WritePrivateProfileString(_T("SubTagMapping"), tagName, mapping, m_iniFilePath);
+		TRACE("SubTagMapping(기본) 저장 결과: %s\n", writeResult ? _T("성공") : _T("실패"));
 	}
 	TRACE("태그 매핑 설정: %s -> %s\n", (LPCTSTR)tagName, (LPCTSTR)mapping);
 }
