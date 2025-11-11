@@ -2,6 +2,9 @@
 
 #include "json.hpp"
 
+// 전방 선언
+struct TagConfigEntry;
+
 class CJsonParser
 {
 public:
@@ -40,6 +43,7 @@ private:
 
 	// 내부 처리 메서드
 	bool ApplyValueToTagOptimized(const CString& tagName, const CString& jsonPath) const;
+	bool ApplyValueToTagWithScale(TagConfigEntry* pConfig) const;  // XLSX 기반 배율 적용
 	bool ApplyDigitalValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const;
 	bool ApplyAnalogValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const;
 	bool ApplyStringValue(const ST_EV_TAG_INFO& tagInfo, const nlohmann::json& jsonValue) const;

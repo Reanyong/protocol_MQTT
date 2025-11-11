@@ -2,6 +2,7 @@
 #include "EVMQTT.h"
 #include "ConfigDlg.h"
 #include "ConfigManager.h"
+#include "XlsxConfigManager.h"  // XLSX 기반 태그 매핑
 #include "afxdialogex.h"
 
 // CConfigDlg 대화 상자
@@ -249,10 +250,84 @@ void CConfigDlg::UpdateTagMappingList()
 	m_listTagMapping.DeleteAllItems();
 
 	CConfigManager& configManager = CConfigManager::GetInstance();
-
-	// ===== INI 파일 순서 유지하여 표시 (대소문자 구분 없음) =====
 	CString deviceType = configManager.GetDeviceType();
 
+	// ===== XLSX 파일에서 데이터 표시 =====
+	// 이미 로드되지 않았으면 로드 시도
+	if (g_xlsxConfig.GetSubConfigCount() == 0 && g_xlsxConfig.GetPubConfigCount() == 0) {
+		// XLSX 파일 경로 생성
+		TCHAR szModulePath[MAX_PATH] = { 0 };
+		GetModuleFileName(NULL, szModulePath, MAX_PATH);
+		CString xlsxPath = szModulePath;
+		int lastSlash = xlsxPath.ReverseFind(_T('\\'));
+		if (lastSlash >= 0) {
+			xlsxPath = xlsxPath.Left(lastSlash + 1);
+		}
+		xlsxPath += _T("EVMQTT_Tags.xlsx");
+
+		TRACE("XLSX 파일 로드 시도 (ConfigDlg): %s\n", (LPCTSTR)xlsxPath);
+
+		if (PathFileExists(xlsxPath)) {
+			if (!g_xlsxConfig.LoadFromXlsx(xlsxPath)) {
+				TRACE("XLSX 파일 로드 실패\n");
+			}
+		}
+		else {
+			TRACE("XLSX 파일 없음: %s\n", (LPCTSTR)xlsxPath);
+		}
+	}
+
+	// XLSX 데이터가 있으면 표시
+	if (g_xlsxConfig.GetSubConfigCount() > 0 || g_xlsxConfig.GetPubConfigCount() > 0) {
+		TRACE("XLSX 데이터 표시 (ConfigDlg)\n");
+
+		// Device Type에 따라 데이터 표시
+		if (deviceType.CompareNoCase(_T("IFM")) == 0) {
+			// IFM 모드: Subscribe 설정 표시
+			const std::vector<TagConfigEntry>& configs = g_xlsxConfig.GetSubConfigs();
+			for (const auto& config : configs) {
+				// 리스트에 추가: 태그명 | 토픽 | JSONPath | 배율
+				int nItem = m_listTagMapping.InsertItem(m_listTagMapping.GetItemCount(), config.tagName);
+				m_listTagMapping.SetItemText(nItem, 1, config.topic);
+
+				// JSONPath + 배율 표시
+				CString jsonPathWithScale;
+				jsonPathWithScale.Format(_T("%s (×%.2f)"), (LPCTSTR)config.jsonPath, config.scale);
+				m_listTagMapping.SetItemText(nItem, 2, jsonPathWithScale);
+			}
+			TRACE("Subscribe 설정 %d개 표시 완료\n", configs.size());
+		}
+		else if (deviceType.CompareNoCase(_T("Navifra")) == 0) {
+			// Navifra 모드: Publish 설정 표시 (배율 불필요)
+			const std::vector<TagConfigEntry>& configs = g_xlsxConfig.GetPubConfigs();
+			for (const auto& config : configs) {
+				int nItem = m_listTagMapping.InsertItem(m_listTagMapping.GetItemCount(), config.tagName);
+				m_listTagMapping.SetItemText(nItem, 1, config.topic);
+
+				// JSON구조만 표시 (Publish는 배율 불필요)
+				m_listTagMapping.SetItemText(nItem, 2, config.jsonPath);
+			}
+			TRACE("Publish 설정 %d개 표시 완료\n", configs.size());
+		}
+		else {
+			// NONE or default: Subscribe 설정 표시
+			const std::vector<TagConfigEntry>& configs = g_xlsxConfig.GetSubConfigs();
+			for (const auto& config : configs) {
+				int nItem = m_listTagMapping.InsertItem(m_listTagMapping.GetItemCount(), config.tagName);
+				m_listTagMapping.SetItemText(nItem, 1, config.topic);
+
+				CString jsonPathWithScale;
+				jsonPathWithScale.Format(_T("%s (×%.2f)"), (LPCTSTR)config.jsonPath, config.scale);
+				m_listTagMapping.SetItemText(nItem, 2, jsonPathWithScale);
+			}
+		}
+		return;  // XLSX 데이터 표시 완료
+	}
+
+	// XLSX 데이터가 없으면 INI 방식으로 fallback
+	TRACE("XLSX 데이터 없음 - INI 방식으로 fallback\n");
+
+	// ===== XLSX 로드 실패 시 기존 INI 방식으로 fallback =====
 	std::map<CString, CString> tagMappings;
 	const std::vector<CString>* tagOrder = nullptr;
 

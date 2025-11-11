@@ -11,6 +11,7 @@
 #include "LogManager.h"
 #include "TagInfoCache.h"
 #include "JsonPathTokenCache.h"
+#include "XlsxConfigManager.h"  // XLSX 기반 태그 매핑
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -357,6 +358,37 @@ int CThreadSub::RunSubscribeMode()
 	m_pMessageQueue = new CMqttMessageQueue(5000);
 	TRACE("Message queue creation completed\n");
 
+	// ===== XLSX 설정 파일 로드 =====
+	TRACE("=== XLSX 설정 파일 로드 시작 ===\n");
+	DWORD xlsxLoadStartTime = GetTickCount();
+
+	// 실행 파일 경로에서 XLSX 파일 경로 생성
+	TCHAR szXlsxModulePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, szXlsxModulePath, MAX_PATH);
+	CString xlsxPath = szXlsxModulePath;
+	int lastSlash = xlsxPath.ReverseFind(_T('\\'));
+	if (lastSlash >= 0) {
+		xlsxPath = xlsxPath.Left(lastSlash + 1);
+	}
+	xlsxPath += _T("EVMQTT_Tags.xlsx");
+
+	TRACE("XLSX 파일 경로: %s\n", (LPCTSTR)xlsxPath);
+
+	// XLSX 파일 로드
+	if (!g_xlsxConfig.LoadFromXlsx(xlsxPath)) {
+		TRACE("ERROR: XLSX 설정 파일 로드 실패!\n");
+		TRACE("파일을 확인하세요: %s\n", (LPCTSTR)xlsxPath);
+
+		// 로드 실패해도 계속 진행 (기존 INI 방식으로 fallback 가능)
+		// return -1;  // 필요시 주석 해제
+	}
+	else {
+		DWORD xlsxLoadTime = GetTickCount() - xlsxLoadStartTime;
+		TRACE("=== XLSX 설정 파일 로드 완료 (%d ms) ===\n", xlsxLoadTime);
+		TRACE("Subscribe 설정: %d개\n", g_xlsxConfig.GetSubConfigCount());
+		TRACE("Publish 설정: %d개\n", g_xlsxConfig.GetPubConfigCount());
+	}
+
 	// 워커 스레드들 생성
 	try {
 		CreateWorkerThreads();
@@ -375,26 +407,24 @@ int CThreadSub::RunSubscribeMode()
 	int nErrorCode = 1;
 	int nNetworkLoop;
 
-	// ===== Phase 1: TagInfoCache 초기화 (핵심!) =====
-	TRACE("=== Phase 1: TagInfoCache PreloadAllTags Starting ===\n");
+	TRACE("=== TagInfoCache PreloadAllTags Starting ===\n");
 	DWORD cacheLoadStartTime = GetTickCount();
 
 	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
 	g_tagCache.PreloadAllTags(tagMappings);
 
 	DWORD cacheLoadTime = GetTickCount() - cacheLoadStartTime;
-	TRACE("=== Phase 1: TagInfoCache PreloadAllTags Completed in %d ms ===\n", cacheLoadTime);
+	TRACE("=== TagInfoCache PreloadAllTags Completed in %d ms ===\n", cacheLoadTime);
 
-	// ===== Phase 2: JSONPath 토큰 캐시 초기화 (핵심!) =====
-	TRACE("=== Phase 2: JsonPathTokenCache PreloadAllJsonPaths Starting ===\n");
+	TRACE("=== JsonPathTokenCache PreloadAllJsonPaths Starting ===\n");
 	DWORD jsonPathCacheStartTime = GetTickCount();
 
 	g_jsonPathCache.PreloadAllJsonPaths(tagMappings);
 
 	DWORD jsonPathCacheLoadTime = GetTickCount() - jsonPathCacheStartTime;
-	TRACE("=== Phase 2: JsonPathTokenCache PreloadAllJsonPaths Completed in %d ms ===\n", jsonPathCacheLoadTime);
+	TRACE("=== JsonPathTokenCache PreloadAllJsonPaths Completed in %d ms ===\n", jsonPathCacheLoadTime);
 
-	// UI에 캐시 로딩 완료 알림 (Phase 1 + Phase 2 통합)
+	// UI에 캐시 로딩 완료 알림
 	if (m_pOwner && ::IsWindow(m_pOwner->GetSafeHwnd()))
 	{
 		CEVMQTTDlg* pDlg = (CEVMQTTDlg*)m_pOwner;

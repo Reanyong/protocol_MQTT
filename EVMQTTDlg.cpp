@@ -6,6 +6,8 @@
 #include "afxdialogex.h"
 #include "ConfigManager.h"
 #include "LogManager.h"
+#include "XlsxConfigManager.h"  // XLSX 메모리 해제
+#include <algorithm>  // std::min
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -303,6 +305,11 @@ void CEVMQTTDlg::OnClose()
 	if (m_bEngineExit)
 	{
 		TRACE("EasyView 엔진 종료로 인한 프로그램 종료 (OnClose)\n");
+
+		// XLSX 메모리 명시적 해제 (메모리 릭 방지)
+		g_xlsxConfig.Clear();
+		TRACE("XLSX 메모리 해제 완료\n");
+
 		RemoveTrayIcon();
 		CDialogEx::OnOK();
 		return;
@@ -558,7 +565,7 @@ void CEVMQTTDlg::AddActivityLog(const CString& tagName, const CString& value,
 
 	// status 문자열의 각 바이트 확인
 	TRACE("status 길이: %d\n", status.GetLength());
-	for (int i = 0; i < min(status.GetLength(), 10); i++) {
+	for (int i = 0; i < (std::min)(status.GetLength(), 10); i++) {
 		TCHAR ch = status.GetAt(i);
 		TRACE("  status[%d]: '%c' (0x%02X)\n", i,
 			(ch >= 32 && ch <= 126) ? ch : '?', (unsigned int)ch);

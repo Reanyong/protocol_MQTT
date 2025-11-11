@@ -1,5 +1,5 @@
-// JsonPathTokenCache.cpp
-// JSONPath 토큰 캐싱 시스템 구현 - Phase 2 최적화
+﻿// JsonPathTokenCache.cpp
+// JSONPath 토큰 캐싱 시스템 구현
 
 #include "pch.h"
 #include "JsonPathTokenCache.h"

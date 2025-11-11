@@ -9,7 +9,7 @@
 *.user
 *.userosscache
 *.sln.docstates
-CLAUDE.md
+*.md
 .claude/*.json
 /test
 nul

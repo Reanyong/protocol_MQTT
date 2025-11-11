@@ -83,14 +83,16 @@ bool CConfigManager::LoadConfig()
 		// Autorun 설정 로드
 		m_autorun = GetPrivateProfileInt(_T("General"), _T("Autorun"), 0, m_iniFilePath);
 
-		// 항상 두 섹션 모두 로드 (UI에서 Device Type 전환 가능하도록)
-		result = result && LoadSubTagMappings();
-		result = result && LoadPubTagMappings();
+		// ===== 태그 매핑은 이제 XLSX에서 로드 (XlsxConfigManager 사용) =====
+		// 기존 INI 기반 태그 매핑 로드는 비활성화
+		// result = result && LoadSubTagMappings();
+		// result = result && LoadPubTagMappings();
 
 		// ===== HashMap 구축 (성능 최적화) =====
-		if (result) {
-			BuildTopicHashMap();
-		}
+		// XLSX 사용으로 더 이상 필요 없음
+		// if (result) {
+		// 	BuildTopicHashMap();
+		// }
 
 		return result;
 	}

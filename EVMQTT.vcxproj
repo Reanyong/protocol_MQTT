@@ -103,14 +103,15 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_WINDOWS;TOOLKIT_PRO_VERSION=1640;_DEBUG;_USE_32BIT_TIME_T;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>.\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\Include;C:\Users\min96\vcpkg\installed\x86-windows\include</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <OutputFile>C:\EasyView3.5\Bin\EVMQTT_D.exe</OutputFile>
-      <AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>C:\Users\min96\vcpkg\installed\x86-windows\debug\lib
       </AdditionalLibraryDirectories>
-      <AdditionalDependencies>..\..\lib\EvCommLib.lib;..\..\lib\EVILib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>..\..\lib\EvCommLib.lib;..\..\lib\EVILib.lib;C:\Users\min96\vcpkg\installed\x86-windows\debug\lib\xlntd.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Midl>
       <MkTypLibCompatible>false</MkTypLibCompatible>
@@ -154,13 +155,15 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_WINDOWS;TOOLKIT_PRO_VERSION=1640;NDEBUG;_USE_32BIT_TIME_T;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>.\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\Include;C:\Users\min96\vcpkg\installed\x86-windows\include</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>..\..\lib\EvCommLib.lib;..\..\lib\EVILib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\Users\min96\vcpkg\installed\x86-windows\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>..\..\lib\EvCommLib.lib;..\..\lib\EVILib.lib;C:\Users\min96\vcpkg\installed\x86-windows\lib\xlnt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>C:\EasyView3.5\Bin\EVMQTT.exe</OutputFile>
     </Link>
     <Midl>
@@ -222,6 +225,7 @@
     <ClInclude Include="EVMQTT.h" />
     <ClInclude Include="EVMQTTDlg.h" />
     <ClInclude Include="ThreadSub.h" />
+    <ClInclude Include="XlsxConfigManager.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ConfigDlg.cpp" />
@@ -242,6 +246,7 @@
     <ClCompile Include="EVMQTT.cpp" />
     <ClCompile Include="EVMQTTDlg.cpp" />
     <ClCompile Include="ThreadSub.cpp" />
+    <ClCompile Include="XlsxConfigManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="EVMQTT.rc" />

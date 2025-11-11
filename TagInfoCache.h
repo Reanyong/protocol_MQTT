@@ -1,6 +1,5 @@
-// TagInfoCache.h
+﻿// TagInfoCache.h
 // EasyView Tag 정보 캐싱 시스템
-// Phase 1: 태그 조회 성능 최적화 (5-10배 개선 목표)
 
 #pragma once
 
@@ -9,9 +8,6 @@
 
 // ============================================================================
 // CTagInfoCache - EasyView 태그 정보 캐싱 클래스
-// ============================================================================
-// 목적: EV_GetTagInfo, EV_GetAiTagInfo 등의 반복 호출 제거
-// 성능: 매 메시지마다 API 호출 (10-50ms) → 캐시 조회 (<1ms)
 // ============================================================================
 
 class CTagInfoCache
@@ -25,7 +21,6 @@ public:
 		int nTagType;     // Tag Type (AI/DI/SI 등)
 		bool isValid;     // 캐시 유효성 플래그
 
-		// Phase 3 (Safe): 태그 구조체 포인터 캐싱
 		ST_EV_TAG_ANALOG_INPUT*  pAiTag;   // AI 태그 포인터
 		ST_EV_TAG_DIGITAL_INPUT* pDiTag;   // DI 태그 포인터
 		ST_EV_TAG_STRING_INPUT*  pSiTag;   // SI 태그 포인터

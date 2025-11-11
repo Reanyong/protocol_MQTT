@@ -3,10 +3,12 @@
 #include "ConfigManager.h"
 #include "JsonPathUtil.h"
 #include "LogManager.h"
-#include "TagInfoCache.h"        // Phase 1: 태그 캐시 추가
-#include "JsonPathTokenCache.h"  // Phase 2: JSONPath 토큰 캐시 추가
+#include "TagInfoCache.h"
+#include "JsonPathTokenCache.h"
+#include "XlsxConfigManager.h"  // XLSX 기반 태그 매핑
 #include <sstream>
 #include <string>
+#include <algorithm>  // std::min
 
 CJsonParser::CJsonParser()
 {
@@ -39,7 +41,7 @@ bool CJsonParser::ParseMessage(const char* payload, int length)
 		CString payloadPreview;
 		if (length > 0 && payload) {
 			// 처음 100자만 미리보기로 저장
-			int previewLen = min(100, length);
+			int previewLen = (std::min)(100, length);
 			std::string preview(payload, previewLen);
 			payloadPreview = CString(preview.c_str());
 			if (length > 100) {
@@ -99,65 +101,64 @@ bool CJsonParser::ApplyMqttTagMapping(const CString& mqttTopic) const
 		return false;
 	}
 
-	// ===== multimap 기반 중복 토픽 지원 =====
-	// 하나의 토픽에 여러 태그 매핑 가능 (예: test → test, test1)
-	std::vector<TagMappingInfo> tagInfos = configManager.GetAllTagsByTopic(mqttTopic);
+	// ===== XLSX 기반 태그 매핑 (g_xlsxConfig 사용) =====
+	// 하나의 토픽에 여러 태그 매핑 가능
+	std::vector<TagConfigEntry*> configs = g_xlsxConfig.GetConfigsByTopic(mqttTopic);
 
-	if (tagInfos.empty()) {
+	if (configs.empty()) {
 		TRACE("토픽에 매핑된 태그 없음: '%S'\n", (LPCTSTR)mqttTopic);
 
-		// 디버깅: Map에 어떤 토픽들이 있는지 출력 (최초 1회만)
-		static bool mapDebugPrinted = false;
-		if (!mapDebugPrinted) {
-			mapDebugPrinted = true;
-			TRACE("=== 디버깅: Topic Map 내용 확인 ===\n");
-			std::map<CString, CString> allMappings = configManager.GetAllTagMappings();
-			TRACE("전체 매핑 개수: %d\n", allMappings.size());
-
-			int printCount = 0;
-			for (const auto& m : allMappings) {
-				if (printCount < 5) {  // 처음 5개만 출력
-					TRACE("  [%d] 태그='%S', 매핑='%S'\n",
-						printCount + 1, (LPCTSTR)m.first, (LPCTSTR)m.second);
-					printCount++;
-				}
-			}
-			if (allMappings.size() > 5) {
-				TRACE("  ... 외 %d개 더 있음\n", allMappings.size() - 5);
-			}
+		// 디버깅: 처음 1회만 XLSX 설정 정보 출력
+		static bool xlsxDebugPrinted = false;
+		if (!xlsxDebugPrinted) {
+			xlsxDebugPrinted = true;
+			TRACE("=== 디버깅: XLSX 설정 내용 확인 ===\n");
+			TRACE("Subscribe 설정: %d개\n", g_xlsxConfig.GetSubConfigCount());
+			TRACE("Publish 설정: %d개\n", g_xlsxConfig.GetPubConfigCount());
 		}
 		return false;
 	}
 
-	TRACE("\n--- multimap 기반 태그 처리 (토픽: %S, 매핑: %d개) ---\n",
-		(LPCTSTR)mqttTopic, tagInfos.size());
+	TRACE("\n--- XLSX 기반 태그 처리 (토픽: %S, 매핑: %d개) ---\n",
+		(LPCTSTR)mqttTopic, (int)configs.size());
 
 	// 같은 토픽의 모든 태그 처리
 	bool anySuccess = false;
 	int successCount = 0;
 	int failCount = 0;
 
-	for (const auto& tagInfo : tagInfos) {
-		TRACE("  처리 중 [%d/%d]: 태그='%S', JSONPath='%S'\n",
-			successCount + failCount + 1, tagInfos.size(),
-			(LPCTSTR)tagInfo.tagName, (LPCTSTR)tagInfo.jsonPath);
+	for (auto* pConfig : configs) {
+		TRACE("  처리 중 [%d/%d]: 태그='%S', JSONPath='%S', 배율=%.2f\n",
+			successCount + failCount + 1, (int)configs.size(),
+			(LPCTSTR)pConfig->tagName, (LPCTSTR)pConfig->jsonPath, pConfig->scale);
 
-		// EasyView 태그 존재 여부 확인
-		ST_EV_TAG_INFO evTagInfo;
-		if (EV_GetTagInfo(tagInfo.tagName, &evTagInfo) <= 0) {
-			TRACE("    → EasyView에서 태그를 찾을 수 없음: %S\n", (LPCTSTR)tagInfo.tagName);
-			failCount++;
-			continue;
+		// ===== 2차 캐싱: EasyView 태그 정보 (첫 메시지 시 1회만) =====
+		if (!pConfig->bCached) {
+			ST_EV_TAG_INFO evTagInfo;
+			if (EV_GetTagInfo(pConfig->tagName, &evTagInfo) <= 0) {
+				TRACE("    → EasyView에서 태그를 찾을 수 없음: %S\n", (LPCTSTR)pConfig->tagName);
+				failCount++;
+				continue;
+			}
+
+			// 캐시에 저장
+			pConfig->nStnPos = evTagInfo.nStnPos;
+			pConfig->nTagPos = evTagInfo.nTagPos;
+			//pConfig->nSBOffset = evTagInfo.nSBOffset;
+			pConfig->nTagType = evTagInfo.nTagType;
+			pConfig->bCached = true;
+			TRACE("    → 태그 정보 캐시 완료 (Stn=%d, Pos=%d)\n",
+				pConfig->nStnPos, pConfig->nTagPos);
 		}
 
-		// JSONPath로 값 추출 및 태그에 적용
-		if (ApplyValueToTagOptimized(tagInfo.tagName, tagInfo.jsonPath)) {
-			TRACE("    → 태그 적용 성공: %S\n", (LPCTSTR)tagInfo.tagName);
+		// JSONPath로 값 추출 및 배율 적용 후 태그에 적용
+		if (ApplyValueToTagWithScale(pConfig)) {
+			TRACE("    → 태그 적용 성공: %S\n", (LPCTSTR)pConfig->tagName);
 			successCount++;
 			anySuccess = true;
 		}
 		else {
-			TRACE("    → 태그 적용 실패: %S\n", (LPCTSTR)tagInfo.tagName);
+			TRACE("    → 태그 적용 실패: %S\n", (LPCTSTR)pConfig->tagName);
 			failCount++;
 		}
 	}
@@ -450,22 +451,132 @@ bool CJsonParser::GetValueByPath(const CString& jsonPath, double& outValue) cons
 }
 
 // ============================================================================
-// Raw HEX 데이터를 ScanBuffer에 직접 쓰기 (모든 IODD 장비 대응)
+// XLSX 기반 태그 적용 (배율 적용 + 2차 캐싱)
 // ============================================================================
 
-// EasyView API 선언
-//extern "C" int APIENTRY EV_PutSBBuffer(int nStnPos, int nWordOffset, short *pSrcSb, int nBuffCnt);
-//extern "C" ST_EV_TAG_ANALOG_INPUT* APIENTRY EV_GetAiTagInfo(int nStnPos, int nTagPos, int *ErrorCode);
-//extern "C" ST_EV_TAG_DIGITAL_INPUT* APIENTRY EV_GetDiTagInfo(int nStnPos, int nTagPos, int *ErrorCode);
-//extern "C" ST_EV_TAG_STRING_INPUT* APIENTRY EV_GetSiTagInfo(int nStnPos, int nTagPos, int *ErrorCode);
+bool CJsonParser::ApplyValueToTagWithScale(TagConfigEntry* pConfig) const
+{
+	if (!m_isValid || !pConfig) {
+		return false;
+	}
+
+	try {
+		// 1. JSONPath로 값 추출
+		std::vector<std::string> pathTokens = CJsonPathUtil::ParseJsonPath(pConfig->jsonPath);
+		if (pathTokens.empty()) {
+			TRACE("JSONPath 파싱 실패: %S\n", (LPCTSTR)pConfig->jsonPath);
+			return false;
+		}
+
+		const nlohmann::json* pValue = CJsonPathUtil::NavigateToValue(m_jsonData, pathTokens);
+		if (!pValue) {
+			TRACE("JSONPath로 값을 찾을 수 없음: %S\n", (LPCTSTR)pConfig->jsonPath);
+			return false;
+		}
+
+		// 2. 값 추출 (HEX 문자열 또는 숫자)
+		double rawValue = 0.0;
+		bool validValue = false;
+
+		if (pValue->is_string()) {
+			// HEX 문자열인 경우 (예: "01234567")
+			std::string hexStr = pValue->get<std::string>();
+
+			// HEX 문자열을 숫자로 변환
+			if (!hexStr.empty()) {
+				try {
+					// HEX 문자열을 정수로 변환
+					unsigned long hexValue = std::stoul(hexStr, nullptr, 16);
+					rawValue = static_cast<double>(hexValue);
+					validValue = true;
+					TRACE("HEX 값 변환: %s → %.0f\n", hexStr.c_str(), rawValue);
+				}
+				catch (...) {
+					TRACE("HEX 변환 실패: %s\n", hexStr.c_str());
+					return false;
+				}
+			}
+		}
+		else if (pValue->is_number()) {
+			// 숫자인 경우
+			rawValue = pValue->get<double>();
+			validValue = true;
+			TRACE("숫자 값: %.2f\n", rawValue);
+		}
+		else {
+			TRACE("지원하지 않는 데이터 타입\n");
+			return false;
+		}
+
+		if (!validValue) {
+			return false;
+		}
+
+		// 3. 배율 적용 ⭐ 핵심 로직
+		double scaledValue = rawValue * pConfig->scale;
+		TRACE("배율 적용: %.0f × %.2f = %.2f (%S)\n",
+			rawValue, pConfig->scale, scaledValue, (LPCTSTR)pConfig->tagName);
+
+		// 4. EasyView Scanbuffer에 쓰기
+		// 캐시된 정보 사용 (EV_GetTagInfo 호출 안 함!)
+		if (!pConfig->bCached) {
+			TRACE("ERROR: 태그 정보가 캐시되지 않음: %S\n", (LPCTSTR)pConfig->tagName);
+			return false;
+		}
+
+		// 태그 타입에 따라 적절한 EasyView 함수 사용
+		// AI (Analog Input) 태그인 경우
+		if (pConfig->nTagType == 0) {  // AI = 0
+			int result = EV_PutSBAiValue(pConfig->nStnPos, pConfig->nTagPos, scaledValue);
+			if (result > 0) {
+				TRACE("AI 태그 쓰기 성공: Stn=%d, Pos=%d, Value=%.2f\n",
+					pConfig->nStnPos, pConfig->nTagPos, scaledValue);
+				return true;
+			}
+			else {
+				TRACE("AI 태그 쓰기 실패\n");
+				return false;
+			}
+		}
+		// DI (Digital Input) 태그인 경우
+		else if (pConfig->nTagType == 2) {  // DI = 2
+			BOOL bValue = (scaledValue != 0.0);
+			int result = EV_PutSBDiValue(pConfig->nStnPos, pConfig->nTagPos, bValue);
+			if (result > 0) {
+				TRACE("DI 태그 쓰기 성공: Value=%d\n", bValue ? 1 : 0);
+				return true;
+			}
+			else {
+				TRACE("DI 태그 쓰기 실패\n");
+				return false;
+			}
+		}
+		// 기타 타입은 AI로 처리
+		else {
+			int result = EV_PutSBAiValue(pConfig->nStnPos, pConfig->nTagPos, scaledValue);
+			return (result > 0);
+		}
+	}
+	catch (const std::exception& e) {
+		CString msg = CA2T(e.what());
+		TRACE("ApplyValueToTagWithScale 예외: %s\n", (LPCTSTR)msg);
+		return false;
+	}
+	catch (...) {
+		TRACE("ApplyValueToTagWithScale 알 수 없는 예외\n");
+		return false;
+	}
+}
+
+// ============================================================================
+// Raw HEX 데이터를 ScanBuffer에 직접 쓰기 (모든 IODD 장비 대응)
+// ============================================================================
 
 bool CJsonParser::ApplyRawHexToScanBuffer(const CString& tagName, const CString& jsonPath) const
 {
 	try {
-		// ===== Phase 1+2: 성능 측정 시작 =====
 		// DWORD cacheStartTime = GetTickCount();  // 성능 최적화: 측정 제거
 
-		// ===== Phase 2: JSONPath 토큰 캐시 조회 (핵심 최적화!) =====
 		std::vector<std::string> pathTokens;
 		bool pathCacheHit = g_jsonPathCache.GetCachedTokens(jsonPath, pathTokens);
 
@@ -542,7 +653,6 @@ bool CJsonParser::ApplyRawHexToScanBuffer(const CString& tagName, const CString&
 			return false;
 		}
 
-		// ===== Phase 1: 캐시에서 태그 정보 조회 (핵심 최적화!) =====
 		// TRACE("[DEBUG] 캐시 조회 시도: 태그명 = '%S'\n", (LPCTSTR)tagName);  // 성능 최적화
 
 		CTagInfoCache::TagCacheEntry cacheEntry;
@@ -554,7 +664,6 @@ bool CJsonParser::ApplyRawHexToScanBuffer(const CString& tagName, const CString&
 
 		int nStnPos, nTagPos, nSBOffset, nTagType;
 
-		// ===== Phase 3: AI/AO 태그는 EV_PutSBAiValue 사용, 나머지는 EV_PutSBBuffer =====
 		if (cacheHit) {
 			nStnPos = cacheEntry.nStnPos;
 			nTagPos = cacheEntry.nTagPos;
