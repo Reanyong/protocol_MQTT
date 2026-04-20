@@ -410,7 +410,32 @@ int CThreadSub::RunSubscribeMode()
 	TRACE("=== TagInfoCache PreloadAllTags Starting ===\n");
 	DWORD cacheLoadStartTime = GetTickCount();
 
-	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
+	// ===== XLSX 데이터 우선 사용, 없으면 INI fallback =====
+	std::map<CString, CString> tagMappings;
+	
+	if (g_xlsxConfig.GetSubConfigCount() > 0) {
+		// XLSX 데이터를 ConfigManager 형식(map)으로 변환
+		TRACE("XLSX Subscribe 데이터를 태그 매핑으로 변환 중...\n");
+		const std::vector<TagConfigEntry>& subConfigs = g_xlsxConfig.GetSubConfigs();
+		for (const auto& config : subConfigs) {
+			// ConfigManager 형식: "토픽,JSONPath"
+			CString mapping;
+			if (config.topic != _T("+")) {
+				mapping.Format(_T("%s,%s"), (LPCTSTR)config.topic, (LPCTSTR)config.jsonPath);
+			}
+			else {
+				mapping = config.jsonPath;
+			}
+			tagMappings[config.tagName] = mapping;
+		}
+		TRACE("XLSX에서 %d개 태그 매핑 생성 완료\n", tagMappings.size());
+	}
+	else {
+		// INI 데이터 사용 (fallback)
+		TRACE("INI 데이터 사용 (XLSX 없음)\n");
+		tagMappings = configManager.GetAllTagMappings();
+	}
+
 	g_tagCache.PreloadAllTags(tagMappings);
 
 	DWORD cacheLoadTime = GetTickCount() - cacheLoadStartTime;

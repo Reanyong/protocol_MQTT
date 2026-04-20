@@ -19,44 +19,63 @@ bool CXlsxConfigManager::LoadFromXlsx(const CString& xlsxPath)
 {
     Clear();
 
+    bool loadSuccess = false;
+    
     try {
-        // xlnt는 std::string을 사용하므로 변환 필요
-        std::string pathStr = CT2A(xlsxPath, CP_UTF8);
-        xlnt::workbook wb;
-        wb.load(pathStr);
-
         TRACE(_T("=== XLSX 로드 시작 ===\n"));
         TRACE(_T("파일 경로: %s\n"), (LPCTSTR)xlsxPath);
-        TRACE(_T("시트 개수: %d\n"), (int)wb.sheet_count());
+        
+        // xlnt::workbook을 별도 scope에서 생성/소멸 (메모리 릭 방지)
+        {
+            // xlnt는 std::string을 사용하므로 변환 필요
+            std::string pathStr = CT2A(xlsxPath, CP_UTF8);
+            xlnt::workbook wb;
+            wb.load(pathStr);
 
-        // Sheet1: SubTagMapping
-        if (!LoadSubTagSheet(wb)) {
-            TRACE(_T("ERROR: SubTagMapping 시트 로드 실패\n"));
-            return false;
+            TRACE(_T("시트 개수: %d\n"), (int)wb.sheet_count());
+
+            // Sheet1: SubTagMapping
+            if (!LoadSubTagSheet(wb)) {
+                TRACE(_T("ERROR: SubTagMapping 시트 로드 실패\n"));
+                return false;
+            }
+
+            // Sheet2: PubTagMapping
+            if (!LoadPubTagSheet(wb)) {
+                TRACE(_T("ERROR: PubTagMapping 시트 로드 실패\n"));
+                return false;
+            }
+            
+            loadSuccess = true;
+            
+            // wb는 여기서 자동 소멸됨 (scope 종료)
+            TRACE(_T("xlnt::workbook 소멸 완료\n"));
         }
 
-        // Sheet2: PubTagMapping
-        if (!LoadPubTagSheet(wb)) {
-            TRACE(_T("ERROR: PubTagMapping 시트 로드 실패\n"));
-            return false;
+        if (loadSuccess) {
+            // vector 메모리 재할당 방지 (중요!)
+            m_subConfigs.shrink_to_fit();
+            m_pubConfigs.shrink_to_fit();
+
+            // 인덱스 구축 (빠른 검색을 위해)
+            BuildIndexes();
+
+            TRACE(_T("=== XLSX 로드 완료 ===\n"));
+            TRACE(_T("Subscribe 설정: %d개\n"), GetSubConfigCount());
+            TRACE(_T("Publish 설정: %d개\n"), GetPubConfigCount());
         }
 
-        // 인덱스 구축 (빠른 검색을 위해)
-        BuildIndexes();
-
-        TRACE(_T("=== XLSX 로드 완료 ===\n"));
-        TRACE(_T("Subscribe 설정: %d개\n"), GetSubConfigCount());
-        TRACE(_T("Publish 설정: %d개\n"), GetPubConfigCount());
-
-        return true;
+        return loadSuccess;
     }
     catch (const std::exception& e) {
         CString msg = CA2T(e.what());
         TRACE(_T("XLSX 로드 예외: %s\n"), (LPCTSTR)msg);
+        Clear();  // 예외 발생 시 명시적 정리
         return false;
     }
     catch (...) {
         TRACE(_T("XLSX 로드 알 수 없는 예외\n"));
+        Clear();  // 예외 발생 시 명시적 정리
         return false;
     }
 }
@@ -219,10 +238,31 @@ TagConfigEntry* CXlsxConfigManager::GetConfigByTagName(const CString& tagName)
 // 초기화
 void CXlsxConfigManager::Clear()
 {
-    m_subConfigs.clear();
-    m_pubConfigs.clear();
+    TRACE(_T("=== XlsxConfigManager::Clear() 시작 ===\n"));
+    
+    // 1. 포인터 인덱스를 먼저 정리 (dangling pointer 방지)
+    size_t topicIndexSize = m_topicIndex.size();
+    size_t tagNameIndexSize = m_tagNameIndex.size();
+    
     m_topicIndex.clear();
     m_tagNameIndex.clear();
+    
+    TRACE(_T("인덱스 정리: Topic=%d, TagName=%d\n"), 
+        topicIndexSize, tagNameIndexSize);
+    
+    // 2. 그 다음 실제 데이터 정리
+    size_t subSize = m_subConfigs.size();
+    size_t pubSize = m_pubConfigs.size();
+    
+    m_subConfigs.clear();
+    m_pubConfigs.clear();
+    
+    // 3. 메모리 확실히 해제 (vector capacity 축소)
+    m_subConfigs.shrink_to_fit();
+    m_pubConfigs.shrink_to_fit();
+    
+    TRACE(_T("데이터 정리: Sub=%d, Pub=%d\n"), subSize, pubSize);
+    TRACE(_T("=== XlsxConfigManager::Clear() 완료 ===\n"));
 }
 
 // 유틸리티: 셀에서 문자열 읽기
@@ -234,8 +274,32 @@ CString CXlsxConfigManager::GetCellString(xlnt::worksheet& ws, int row, int col)
             return _T("");
         }
 
+        // xlnt에서 UTF-8 std::string 가져오기
         std::string str = cell.to_string();
-        return CA2T(str.c_str(), CP_UTF8);
+        
+        if (str.empty()) {
+            return _T("");
+        }
+
+        // ===== 멀티바이트 프로젝트 대응: UTF-8 → 유니코드 → MBCS =====
+        // 1단계: UTF-8 → 유니코드(wchar_t)
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+        if (wideLen <= 0) {
+            return _T("");
+        }
+
+        wchar_t* wideBuf = new wchar_t[wideLen];
+        MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, wideBuf, wideLen);
+
+        // 2단계: 유니코드 → CString (CString이 자동으로 MBCS 변환)
+        CString result(wideBuf);
+
+        // 메모리 정리
+        delete[] wideBuf;
+        str.clear();
+        str.shrink_to_fit();
+
+        return result;
     }
     catch (...) {
         return _T("");

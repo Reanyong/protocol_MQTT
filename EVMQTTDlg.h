@@ -64,6 +64,9 @@ public:
 	enum { IDD = IDD_EVMQTT_DIALOG };
 #endif
 
+	// 통신 상태 확인용 (ConfigDlg에서 접근)
+	bool IsThreadRunning() const { return m_pThreadSub != nullptr; }
+
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV 지원입니다.
 

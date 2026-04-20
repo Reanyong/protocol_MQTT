@@ -186,6 +186,33 @@ BOOL CEVMQTTDlg::OnInitDialog()
 	CConfigManager& configManager = CConfigManager::GetInstance();
 	configManager.LoadConfig();
 
+	// XLSX 설정 파일 로드 (프로그램 시작 시 한 번만)
+	//TCHAR szModulePath[MAX_PATH] = { 0 };
+	//GetModuleFileName(NULL, szModulePath, MAX_PATH);
+	CString xlsxPath = szModulePath;
+	int lastSlash = xlsxPath.ReverseFind(_T('\\'));
+	if (lastSlash >= 0) {
+		xlsxPath = xlsxPath.Left(lastSlash + 1);
+	}
+	xlsxPath += _T("EVMQTT_Tags.xlsx");
+	
+	TRACE("=== XLSX 초기 로드 시작 (EVMQTTDlg) ===\n");
+	TRACE("XLSX 경로: %s\n", (LPCTSTR)xlsxPath);
+	
+	if (PathFileExists(xlsxPath)) {
+		if (g_xlsxConfig.LoadFromXlsx(xlsxPath)) {
+			TRACE("XLSX 로드 성공: Sub=%d개, Pub=%d개\n", 
+				g_xlsxConfig.GetSubConfigCount(), 
+				g_xlsxConfig.GetPubConfigCount());
+		}
+		else {
+			TRACE("WARNING: XLSX 파일 로드 실패\n");
+		}
+	}
+	else {
+		TRACE("INFO: XLSX 파일 없음 (INI 방식 사용)\n");
+	}
+
 	// UpdateMqttStatus 호출 제거 (기능 비활성화)
 	// UpdateTagInfo 호출 제거 (기능 비활성화)
 	UpdatePerformance(0, 0);

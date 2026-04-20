@@ -3,6 +3,7 @@
 #include "ConfigDlg.h"
 #include "ConfigManager.h"
 #include "XlsxConfigManager.h"  // XLSX 기반 태그 매핑
+#include "EVMQTTDlg.h"  // 통신 상태 확인용
 #include "afxdialogex.h"
 
 // CConfigDlg 대화 상자
@@ -16,7 +17,6 @@ CConfigDlg::CConfigDlg(CWnd* pParent /*=nullptr*/)
 	, m_nMqttKeepAlive(60)
 	, m_nParsingInterval(50)
 	, m_strDeviceType(_T("NONE"))
-	, m_pEditCtrl(nullptr)
 	, m_pInlineEdit(nullptr)
 	, m_editItem(-1)
 	, m_editSubItem(-1)
@@ -27,14 +27,13 @@ CConfigDlg::CConfigDlg(CWnd* pParent /*=nullptr*/)
 
 CConfigDlg::~CConfigDlg()
 {
-	if (m_pEditCtrl)
-	{
-		delete m_pEditCtrl;
-		m_pEditCtrl = nullptr;
-	}
-
+	// CWnd 파생 클래스는 윈도우 핸들이 있으면 먼저 파괴해야 함
 	if (m_pInlineEdit)
 	{
+		if (m_pInlineEdit->GetSafeHwnd() != NULL)
+		{
+			m_pInlineEdit->DestroyWindow();
+		}
 		delete m_pInlineEdit;
 		m_pInlineEdit = nullptr;
 	}
@@ -83,6 +82,52 @@ BOOL CConfigDlg::OnInitDialog()
 	// 설정 데이터 로드
 	LoadConfigData();
 
+	// ===== XLSX 파일 다시 로드 (엑셀 수정 반영) =====
+	// 주의: 통신 중에는 재로드하지 않음 (캐시 보존)
+	bool bShouldReload = true;
+	
+	// 부모 윈도우에서 통신 상태 확인
+	CEVMQTTDlg* pParentDlg = dynamic_cast<CEVMQTTDlg*>(GetParent());
+	if (pParentDlg && pParentDlg->IsThreadRunning())
+	{
+		bShouldReload = false;
+		TRACE("=== 통신 중이므로 XLSX 재로드 생략 (캐시 보존) ===\n");
+		TRACE("엑셀 수정사항을 반영하려면 통신을 먼저 종료하세요.\n");
+	}
+	
+	if (bShouldReload)
+	{
+		TCHAR szModulePath[MAX_PATH] = { 0 };
+		GetModuleFileName(NULL, szModulePath, MAX_PATH);
+		CString xlsxPath = szModulePath;
+		int lastSlash = xlsxPath.ReverseFind(_T('\\'));
+		if (lastSlash >= 0) {
+			xlsxPath = xlsxPath.Left(lastSlash + 1);
+		}
+		xlsxPath += _T("EVMQTT_Tags.xlsx");
+		
+		TRACE("=== 설정 다이얼로그: XLSX 재로드 시작 ===\n");
+		
+		if (PathFileExists(xlsxPath)) {
+			// 기존 데이터 초기화 후 다시 로드
+			g_xlsxConfig.Clear();
+			
+			if (g_xlsxConfig.LoadFromXlsx(xlsxPath)) {
+				TRACE("XLSX 재로드 성공: Sub=%d개, Pub=%d개\n", 
+					g_xlsxConfig.GetSubConfigCount(), 
+					g_xlsxConfig.GetPubConfigCount());
+			}
+			else {
+				TRACE("WARNING: XLSX 파일 재로드 실패\n");
+			}
+		}
+		else {
+			TRACE("INFO: XLSX 파일 없음 (INI 방식 사용)\n");
+			// XLSX 파일이 없으면 데이터 초기화
+			g_xlsxConfig.Clear();
+		}
+	}
+
 	// Device Type에 맞게 컬럼 헤더 설정
 	LVCOLUMN col;
 	col.mask = LVCF_TEXT;
@@ -104,47 +149,104 @@ BOOL CConfigDlg::OnInitDialog()
 	// INI의 태그 개수 표시
 	DisplayTagCount();
 
+	// XLSX 데이터가 있으면 추가/삭제 버튼 비활성화 (읽기 전용)
+	if (g_xlsxConfig.GetSubConfigCount() > 0 || g_xlsxConfig.GetPubConfigCount() > 0)
+	{
+		GetDlgItem(IDC_BTN_ADD_TAG)->EnableWindow(FALSE);
+		GetDlgItem(IDC_BTN_DELETE_TAG)->EnableWindow(FALSE);
+		TRACE("XLSX 데이터 로드됨 - 편집 버튼 비활성화\n");
+	}
+	else
+	{
+		GetDlgItem(IDC_BTN_ADD_TAG)->EnableWindow(TRUE);
+		GetDlgItem(IDC_BTN_DELETE_TAG)->EnableWindow(TRUE);
+		TRACE("INI 데이터 로드됨 - 편집 버튼 활성화\n");
+	}
+
 	return TRUE;
 }
 
 BOOL CConfigDlg::PreTranslateMessage(MSG* pMsg)
 {
-	// 키보드 단축키 처리
 	if (pMsg->message == WM_KEYDOWN)
 	{
-		// 인라인 편집 중이면 별도 처리하지 않음 (CInlineEdit에서 처리)
-		if (m_pInlineEdit && m_pInlineEdit->IsWindowVisible())
+		// XLSX 모드: 읽기 전용 동작
+		if (g_xlsxConfig.GetSubConfigCount() > 0 || g_xlsxConfig.GetPubConfigCount() > 0)
 		{
-			return CDialogEx::PreTranslateMessage(pMsg);
-		}
-
-		// 리스트 컨트롤에 포커스가 있을 때만 처리
-		if (GetFocus() == &m_listTagMapping)
-		{
-			switch (pMsg->wParam)
+			// ESC는 항상 다이얼로그 닫기
+			if (pMsg->wParam == VK_ESCAPE)
 			{
-			case VK_RETURN:  // 엔터키 - 추가
-			{
-				// 빈 행이나 완성된 행이 있으면 추가
-				AddNewTagRow();
+				OnCancel();
 				return TRUE;
 			}
 
-			case VK_DELETE:  // Delete키 - 삭제
+			// Enter 키는 확인/취소 버튼에 포커스가 있을 때만 작동
+			if (pMsg->wParam == VK_RETURN)
 			{
-				DeleteSelectedTag();
-				return TRUE;
-			}
+				CWnd* pFocusWnd = GetFocus();
 
-			case VK_ESCAPE:  // ESC키 - 편집 취소
-			{
-				if (m_pInlineEdit && m_pInlineEdit->IsWindowVisible())
+				// 확인 버튼에 포커스
+				if (pFocusWnd == GetDlgItem(IDOK))
 				{
-					EndEditing(false);
+					OnOK();
+					return TRUE;
+				}
+				// 취소 버튼에 포커스
+				else if (pFocusWnd == GetDlgItem(IDCANCEL))
+				{
+					OnCancel();
+					return TRUE;
+				}
+				// 그 외에는 Enter 무시
+				else
+				{
 					return TRUE;
 				}
 			}
-			break;
+
+			// Delete 키는 항상 무시 (읽기 전용)
+			if (pMsg->wParam == VK_DELETE)
+			{
+				return TRUE;
+			}
+		}
+		// INI 모드: 편집 가능
+		else
+		{
+			// 리스트 컨트롤에 포커스가 있을 때만 처리
+			if (GetFocus() == &m_listTagMapping)
+			{
+				// 인라인 편집 중이면 별도 처리하지 않음 (CInlineEdit에서 처리)
+				if (m_pInlineEdit && m_pInlineEdit->GetSafeHwnd() && m_pInlineEdit->IsWindowVisible())
+				{
+					return CDialogEx::PreTranslateMessage(pMsg);
+				}
+
+				switch (pMsg->wParam)
+				{
+				case VK_RETURN:  // 엔터키 - 추가
+				{
+					// 빈 행이나 완성된 행이 있으면 추가
+					AddNewTagRow();
+					return TRUE;
+				}
+
+				case VK_DELETE:  // Delete키 - 삭제
+				{
+					DeleteSelectedTag();
+					return TRUE;
+				}
+
+				case VK_ESCAPE:  // ESC키 - 편집 취소
+				{
+					if (m_pInlineEdit && m_pInlineEdit->GetSafeHwnd() && m_pInlineEdit->IsWindowVisible())
+					{
+						EndEditing(false);
+						return TRUE;
+					}
+				}
+				break;
+				}
 			}
 		}
 	}
@@ -155,7 +257,7 @@ BOOL CConfigDlg::PreTranslateMessage(MSG* pMsg)
 void CConfigDlg::OnOK()
 {
 	// 편집 중이면 편집 종료
-	if (m_pInlineEdit && m_pInlineEdit->IsWindowVisible())
+	if (m_pInlineEdit && m_pInlineEdit->GetSafeHwnd() && m_pInlineEdit->IsWindowVisible())
 	{
 		EndEditing(true);
 	}
@@ -176,7 +278,7 @@ void CConfigDlg::OnOK()
 void CConfigDlg::OnCancel()
 {
 	// 편집 중이면 편집 취소
-	if (m_pInlineEdit && m_pInlineEdit->IsWindowVisible())
+	if (m_pInlineEdit && m_pInlineEdit->GetSafeHwnd() && m_pInlineEdit->IsWindowVisible())
 	{
 		EndEditing(false);
 	}
@@ -237,12 +339,13 @@ void CConfigDlg::InitTagMappingList()
 	DWORD dwStyle = m_listTagMapping.GetExtendedStyle();
 	m_listTagMapping.SetExtendedStyle(dwStyle | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_LABELTIP);
 
-	// 컬럼 추가
+	// 컬럼 추가 (4개: 태그명, 토픽, JSONPath/Station태그명, 비고)
 	m_listTagMapping.InsertColumn(0, _T("태그명"), LVCFMT_LEFT, 120);
 	m_listTagMapping.InsertColumn(1, _T("토픽"), LVCFMT_LEFT, 100);
 	m_listTagMapping.InsertColumn(2, _T("JSONPath"), LVCFMT_LEFT, 150);
+	m_listTagMapping.InsertColumn(3, _T("비고"), LVCFMT_LEFT, 200);
 
-	TRACE("태그 매핑 리스트 초기화 완료\n");
+	TRACE("태그 매핑 리스트 초기화 완료 (4개 컬럼)\n");
 }
 
 void CConfigDlg::UpdateTagMappingList()
@@ -253,8 +356,11 @@ void CConfigDlg::UpdateTagMappingList()
 	CString deviceType = configManager.GetDeviceType();
 
 	// ===== XLSX 파일에서 데이터 표시 =====
-	// 이미 로드되지 않았으면 로드 시도
+	// 주의: EVMQTTDlg::OnInitDialog()에서 이미 로드되었음
+	// 이 체크는 fallback용 (예: EVMQTTDlg가 아닌 다른 곳에서 호출될 경우)
 	if (g_xlsxConfig.GetSubConfigCount() == 0 && g_xlsxConfig.GetPubConfigCount() == 0) {
+		TRACE("WARNING: XLSX가 아직 로드되지 않음 - 지금 로드 시도\n");
+		
 		// XLSX 파일 경로 생성
 		TCHAR szModulePath[MAX_PATH] = { 0 };
 		GetModuleFileName(NULL, szModulePath, MAX_PATH);
@@ -265,7 +371,7 @@ void CConfigDlg::UpdateTagMappingList()
 		}
 		xlsxPath += _T("EVMQTT_Tags.xlsx");
 
-		TRACE("XLSX 파일 로드 시도 (ConfigDlg): %s\n", (LPCTSTR)xlsxPath);
+		TRACE("XLSX 파일 로드 시도 (ConfigDlg fallback): %s\n", (LPCTSTR)xlsxPath);
 
 		if (PathFileExists(xlsxPath)) {
 			if (!g_xlsxConfig.LoadFromXlsx(xlsxPath)) {
@@ -275,6 +381,11 @@ void CConfigDlg::UpdateTagMappingList()
 		else {
 			TRACE("XLSX 파일 없음: %s\n", (LPCTSTR)xlsxPath);
 		}
+	}
+	else {
+		TRACE("XLSX 이미 로드됨 (Sub=%d, Pub=%d) - 재사용\n", 
+			g_xlsxConfig.GetSubConfigCount(), 
+			g_xlsxConfig.GetPubConfigCount());
 	}
 
 	// XLSX 데이터가 있으면 표시
@@ -286,7 +397,7 @@ void CConfigDlg::UpdateTagMappingList()
 			// IFM 모드: Subscribe 설정 표시
 			const std::vector<TagConfigEntry>& configs = g_xlsxConfig.GetSubConfigs();
 			for (const auto& config : configs) {
-				// 리스트에 추가: 태그명 | 토픽 | JSONPath | 배율
+				// 리스트에 추가: 태그명 | 토픽 | JSONPath+배율 | 비고
 				int nItem = m_listTagMapping.InsertItem(m_listTagMapping.GetItemCount(), config.tagName);
 				m_listTagMapping.SetItemText(nItem, 1, config.topic);
 
@@ -294,6 +405,9 @@ void CConfigDlg::UpdateTagMappingList()
 				CString jsonPathWithScale;
 				jsonPathWithScale.Format(_T("%s (×%.2f)"), (LPCTSTR)config.jsonPath, config.scale);
 				m_listTagMapping.SetItemText(nItem, 2, jsonPathWithScale);
+				
+				// 비고 표시
+				m_listTagMapping.SetItemText(nItem, 3, config.comment);
 			}
 			TRACE("Subscribe 설정 %d개 표시 완료\n", configs.size());
 		}
@@ -306,6 +420,9 @@ void CConfigDlg::UpdateTagMappingList()
 
 				// JSON구조만 표시 (Publish는 배율 불필요)
 				m_listTagMapping.SetItemText(nItem, 2, config.jsonPath);
+				
+				// 비고 표시
+				m_listTagMapping.SetItemText(nItem, 3, config.comment);
 			}
 			TRACE("Publish 설정 %d개 표시 완료\n", configs.size());
 		}
@@ -319,6 +436,9 @@ void CConfigDlg::UpdateTagMappingList()
 				CString jsonPathWithScale;
 				jsonPathWithScale.Format(_T("%s (×%.2f)"), (LPCTSTR)config.jsonPath, config.scale);
 				m_listTagMapping.SetItemText(nItem, 2, jsonPathWithScale);
+				
+				// 비고 표시
+				m_listTagMapping.SetItemText(nItem, 3, config.comment);
 			}
 		}
 		return;  // XLSX 데이터 표시 완료
@@ -405,6 +525,7 @@ void CConfigDlg::UpdateTagMappingList()
 	int emptyIndex = m_listTagMapping.InsertItem(m_listTagMapping.GetItemCount(), _T(""));
 	m_listTagMapping.SetItemText(emptyIndex, 1, _T(""));
 	m_listTagMapping.SetItemText(emptyIndex, 2, _T(""));
+	m_listTagMapping.SetItemText(emptyIndex, 3, _T(""));  // 비고 컬럼
 
 	TRACE("태그 매핑 리스트 업데이트 완료: %d개 항목 (INI 순서 유지)\n", m_listTagMapping.GetItemCount());
 }
@@ -415,6 +536,7 @@ void CConfigDlg::AddTagToList(const CString& tagName, const CString& topic, cons
 	m_listTagMapping.InsertItem(index, tagName);
 	m_listTagMapping.SetItemText(index, 1, topic);
 	m_listTagMapping.SetItemText(index, 2, jsonPath);
+	m_listTagMapping.SetItemText(index, 3, _T(""));  // INI 방식은 비고 없음
 }
 
 bool CConfigDlg::ValidateConfig()
@@ -462,23 +584,20 @@ void CConfigDlg::ShowTagEditDialog(const CString& tagName, const CString& mappin
 
 void CConfigDlg::OnBnClickedBtnAddTag()
 {
-	AddNewTagRow();
+	// XLSX 데이터는 읽기 전용 - 태그 추가 비활성화
+	AfxMessageBox(_T("XLSX 파일에서 로드된 데이터는 읽기 전용입니다.\n편집하려면 XLSX 파일을 직접 수정한 후 프로그램을 재시작하세요."), MB_OK | MB_ICONINFORMATION);
 }
 
 void CConfigDlg::OnBnClickedBtnDeleteTag()
 {
-	DeleteSelectedTag();
+	// XLSX 데이터는 읽기 전용 - 태그 삭제 비활성화
+	AfxMessageBox(_T("XLSX 파일에서 로드된 데이터는 읽기 전용입니다.\n편집하려면 XLSX 파일을 직접 수정한 후 프로그램을 재시작하세요."), MB_OK | MB_ICONINFORMATION);
 }
 
 void CConfigDlg::OnNMDblclkListTagMapping(NMHDR* pNMHDR, LRESULT* pResult)
 {
-	LPNMITEMACTIVATE pNMItemActivate = reinterpret_cast<LPNMITEMACTIVATE>(pNMHDR);
-
-	if (pNMItemActivate->iItem >= 0 && pNMItemActivate->iSubItem >= 0)
-	{
-		StartEditingCell(pNMItemActivate->iItem, pNMItemActivate->iSubItem);
-	}
-
+	// XLSX 데이터는 읽기 전용 - 더블클릭 편집 비활성화
+	// 편집하려면 XLSX 파일을 직접 수정하세요
 	*pResult = 0;
 }
 
@@ -500,7 +619,7 @@ void CConfigDlg::OnNMClickListTagMapping(NMHDR* pNMHDR, LRESULT* pResult)
 	LPNMITEMACTIVATE pNMItemActivate = reinterpret_cast<LPNMITEMACTIVATE>(pNMHDR);
 
 	// 편집 중이면 편집 종료
-	if (m_pInlineEdit && m_pInlineEdit->IsWindowVisible())
+	if (m_pInlineEdit && m_pInlineEdit->GetSafeHwnd() && m_pInlineEdit->IsWindowVisible())
 	{
 		EndEditing(true);
 	}
@@ -529,13 +648,14 @@ void CConfigDlg::AddNewTagRow()
 
 		if (ValidateTagRow(lastIndex, tagName, topic, jsonPath))
 		{
-			// 유효한 데이터가 있으면 저장
-			SaveTagToConfig(tagName, topic, jsonPath);
+		// 유효한 데이터가 있으면 저장
+		SaveTagToConfig(tagName, topic, jsonPath);
 
-			// 새로운 빈 행 추가
-			int newIndex = m_listTagMapping.InsertItem(itemCount, _T(""));
-			m_listTagMapping.SetItemText(newIndex, 1, _T(""));
-			m_listTagMapping.SetItemText(newIndex, 2, _T(""));
+		// 새로운 빈 행 추가
+		int newIndex = m_listTagMapping.InsertItem(itemCount, _T(""));
+		m_listTagMapping.SetItemText(newIndex, 1, _T(""));
+		m_listTagMapping.SetItemText(newIndex, 2, _T(""));
+		m_listTagMapping.SetItemText(newIndex, 3, _T(""));
 
 			// 새 행 선택
 			m_listTagMapping.SetItemState(newIndex, LVIS_SELECTED | LVIS_FOCUSED,
@@ -552,6 +672,7 @@ void CConfigDlg::AddNewTagRow()
 		else
 		{
 			// 데이터가 불완전하면 첫 번째 빈 셀로 이동하여 편집 시작
+			// 비고(3번 컬럼)는 읽기 전용이므로 0, 1, 2번만 편집
 			for (int col = 0; col < 3; col++)
 			{
 				CString cellText = m_listTagMapping.GetItemText(lastIndex, col);
@@ -569,6 +690,7 @@ void CConfigDlg::AddNewTagRow()
 		int newIndex = m_listTagMapping.InsertItem(0, _T(""));
 		m_listTagMapping.SetItemText(newIndex, 1, _T(""));
 		m_listTagMapping.SetItemText(newIndex, 2, _T(""));
+		m_listTagMapping.SetItemText(newIndex, 3, _T(""));
 
 		StartEditingCell(newIndex, 0);
 	}
@@ -641,6 +763,7 @@ void CConfigDlg::DeleteTagAtIndex(int index)
 			int emptyIndex = m_listTagMapping.InsertItem(itemCount, _T(""));
 			m_listTagMapping.SetItemText(emptyIndex, 1, _T(""));
 			m_listTagMapping.SetItemText(emptyIndex, 2, _T(""));
+			m_listTagMapping.SetItemText(emptyIndex, 3, _T(""));
 		}
 
 		m_bListModified = true;
@@ -787,7 +910,7 @@ void CConfigDlg::StartEditingCell(int item, int subItem)
 		return;
 
 	// 기존 편집 종료
-	if (m_pInlineEdit && m_pInlineEdit->IsWindowVisible())
+	if (m_pInlineEdit && m_pInlineEdit->GetSafeHwnd() && m_pInlineEdit->IsWindowVisible())
 	{
 		EndEditing(true);
 	}
@@ -805,16 +928,30 @@ void CConfigDlg::StartEditingCell(int item, int subItem)
 		rect.right = rect.left + headerRect.Width() - 2;  // 여백 2픽셀
 	}
 
-	// InlineEdit 컨트롤 생성
-	if (!m_pInlineEdit)
+	// InlineEdit 컨트롤 생성 또는 재사용
+	if (!m_pInlineEdit || m_pInlineEdit->GetSafeHwnd() == NULL)
 	{
+		// 기존 객체가 있지만 윈도우가 없으면 삭제 후 재생성
+		if (m_pInlineEdit)
+		{
+			delete m_pInlineEdit;
+			m_pInlineEdit = nullptr;
+		}
+
 		m_pInlineEdit = new CInlineEdit(this);
-		m_pInlineEdit->Create(WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-			rect, &m_listTagMapping, 1000);
+		if (!m_pInlineEdit->Create(WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+			rect, &m_listTagMapping, 1000))
+		{
+			// 생성 실패 시 메모리 누수 방지
+			delete m_pInlineEdit;
+			m_pInlineEdit = nullptr;
+			return;
+		}
 		m_pInlineEdit->SetFont(m_listTagMapping.GetFont());
 	}
 	else
 	{
+		// 기존 윈도우 재사용
 		m_pInlineEdit->MoveWindow(&rect);
 		m_pInlineEdit->ShowWindow(SW_SHOW);
 	}
@@ -834,7 +971,7 @@ void CConfigDlg::StartEditingCell(int item, int subItem)
 
 void CConfigDlg::EndEditing(bool save)
 {
-	if (!m_pInlineEdit || !m_pInlineEdit->IsWindowVisible())
+	if (!m_pInlineEdit || !m_pInlineEdit->GetSafeHwnd() || !m_pInlineEdit->IsWindowVisible())
 		return;
 
 	if (save && m_editItem >= 0 && m_editSubItem >= 0)
@@ -951,9 +1088,9 @@ BOOL CConfigDlg::CInlineEdit::PreTranslateMessage(MSG* pMsg)
 			// 현재 편집 저장
 			m_pParent->EndEditing(true);
 
-			// 다음 셀로 이동
-			int nextSubItem = m_pParent->m_editSubItem + 1;
-			if (nextSubItem <= 2)  // 컬럼 0, 1, 2만 있음
+		// 다음 셀로 이동
+		int nextSubItem = m_pParent->m_editSubItem + 1;
+		if (nextSubItem <= 2)  // 편집 가능 컬럼 0, 1, 2 (비고는 읽기 전용)
 			{
 				m_pParent->StartEditingCell(m_pParent->m_editItem, nextSubItem);
 			}
@@ -984,10 +1121,11 @@ BOOL CConfigDlg::CInlineEdit::PreTranslateMessage(MSG* pMsg)
 		{
 			m_pParent->EndEditing(true);
 
-			bool isShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-			int nextSubItem = isShift ? (m_pParent->m_editSubItem - 1) : (m_pParent->m_editSubItem + 1);
+		bool isShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+		int nextSubItem = isShift ? (m_pParent->m_editSubItem - 1) : (m_pParent->m_editSubItem + 1);
 
-			if (nextSubItem >= 0 && nextSubItem <= 2)
+		// 편집 가능 컬럼 0, 1, 2 (비고는 읽기 전용)
+		if (nextSubItem >= 0 && nextSubItem <= 2)
 			{
 				m_pParent->StartEditingCell(m_pParent->m_editItem, nextSubItem);
 			}
@@ -1002,10 +1140,31 @@ BOOL CConfigDlg::CInlineEdit::PreTranslateMessage(MSG* pMsg)
 
 void CConfigDlg::DisplayTagCount()
 {
-	CConfigManager& configManager = CConfigManager::GetInstance();
-	std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
+	int tagCount = 0;
 	
-	int tagCount = static_cast<int>(tagMappings.size());
+	// XLSX 데이터가 있으면 XLSX 카운트 사용
+	if (g_xlsxConfig.GetSubConfigCount() > 0 || g_xlsxConfig.GetPubConfigCount() > 0)
+	{
+		CConfigManager& configManager = CConfigManager::GetInstance();
+		CString deviceType = configManager.GetDeviceType();
+		
+		if (deviceType.CompareNoCase(_T("IFM")) == 0) {
+			tagCount = g_xlsxConfig.GetSubConfigCount();
+		}
+		else if (deviceType.CompareNoCase(_T("Navifra")) == 0) {
+			tagCount = g_xlsxConfig.GetPubConfigCount();
+		}
+		else {
+			tagCount = g_xlsxConfig.GetSubConfigCount();
+		}
+	}
+	else
+	{
+		// INI 데이터 카운트
+		CConfigManager& configManager = CConfigManager::GetInstance();
+		std::map<CString, CString> tagMappings = configManager.GetAllTagMappings();
+		tagCount = static_cast<int>(tagMappings.size());
+	}
 	
 	CString countText;
 	countText.Format(_T("총 등록된 태그: %d개"), tagCount);
@@ -1055,6 +1214,18 @@ void CConfigDlg::OnCbnSelchangeComboDeviceType()
 	
 	// 태그 개수 업데이트
 	DisplayTagCount();
+	
+	// XLSX 데이터가 있으면 추가/삭제 버튼 비활성화 (읽기 전용)
+	if (g_xlsxConfig.GetSubConfigCount() > 0 || g_xlsxConfig.GetPubConfigCount() > 0)
+	{
+		GetDlgItem(IDC_BTN_ADD_TAG)->EnableWindow(FALSE);
+		GetDlgItem(IDC_BTN_DELETE_TAG)->EnableWindow(FALSE);
+	}
+	else
+	{
+		GetDlgItem(IDC_BTN_ADD_TAG)->EnableWindow(TRUE);
+		GetDlgItem(IDC_BTN_DELETE_TAG)->EnableWindow(TRUE);
+	}
 	
 	TRACE("Device Type 변경 완료: 컬럼 헤더 + 데이터 로드\n");
 }

@@ -17,6 +17,14 @@ CConfigManager::CConfigManager()
 
 CConfigManager::~CConfigManager()
 {
+	// 명시적으로 컨테이너 정리
+	m_topicToTagMap.clear();
+	m_subTagMappings.clear();
+	m_pubTagMappings.clear();
+	m_subTagOrder.clear();
+	m_pubTagOrder.clear();
+	
+	TRACE("ConfigManager 소멸자: 모든 리소스 정리 완료\n");
 }
 
 CConfigManager& CConfigManager::GetInstance()

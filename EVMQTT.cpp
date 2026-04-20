@@ -3,6 +3,8 @@
 #include "framework.h"
 #include "EVMQTT.h"
 #include "EVMQTTDlg.h"
+#include "XlsxConfigManager.h"
+#include "ConfigManager.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -182,12 +184,35 @@ BOOL CEVMQTTApp::InitInstance()
 
 int CEVMQTTApp::ExitInstance()
 {
-	// Mutex 해제
+	// 전역 리소스 명시적 정리 (메모리 릭 방지)
+	TRACE("=== 프로그램 종료: 리소스 정리 시작 ===\n");
+	
+	// 1. XLSX 설정 관리자 정리 (전역 변수)
+	g_xlsxConfig.Clear();
+	TRACE("XlsxConfig 정리 완료\n");
+	
+	// 2. ConfigManager 싱글톤 정리는 자동 (static 소멸자)
+	//    하지만 명시적으로 참조하여 소멸 순서 보장
+	CConfigManager& configManager = CConfigManager::GetInstance();
+	TRACE("ConfigManager 참조 완료 (자동 소멸 대기)\n");
+	
+	// 3. Mutex 해제
 	if (m_hMutex)
 	{
 		CloseHandle(m_hMutex);
 		m_hMutex = NULL;
+		TRACE("Mutex 해제 완료\n");
 	}
-
-	return CWinApp::ExitInstance();
+	
+	// 4. 전역 CString 정리
+	g_szProjectName.Empty();
+	TRACE("전역 문자열 정리 완료\n");
+	
+	TRACE("=== 리소스 정리 완료 ===\n");
+	
+	// 5. MFC 종료 처리
+	int result = CWinApp::ExitInstance();
+	
+	TRACE("=== 프로그램 종료 완료 (반환값: %d) ===\n", result);
+	return result;
 }

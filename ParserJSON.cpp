@@ -479,7 +479,7 @@ bool CJsonParser::ApplyValueToTagWithScale(TagConfigEntry* pConfig) const
 		bool validValue = false;
 
 		if (pValue->is_string()) {
-			// HEX 문자열인 경우 (예: "01234567")
+			// HEX 문자열인 경우 (예: "01234567" 또는 "02200100")
 			std::string hexStr = pValue->get<std::string>();
 
 			// HEX 문자열을 숫자로 변환
@@ -487,9 +487,21 @@ bool CJsonParser::ApplyValueToTagWithScale(TagConfigEntry* pConfig) const
 				try {
 					// HEX 문자열을 정수로 변환
 					unsigned long hexValue = std::stoul(hexStr, nullptr, 16);
+
+					// ⭐ IFM 프로토콜: 8자리 HEX는 32bit 값, 상위 16bit만 사용
+					// 예: 02200100 → 상위 16bit(0220) = 544
+					if (hexStr.length() == 8) {
+						unsigned long originalValue = hexValue;
+						hexValue = (hexValue >> 16) & 0xFFFF;  // 상위 16bit 추출
+						TRACE("HEX 8자리 → 상위 16bit 추출: %s (0x%08X) → 0x%04X (%d)\n",
+							hexStr.c_str(), originalValue, hexValue, hexValue);
+					}
+					else {
+						TRACE("HEX 값 변환: %s → 0x%X (%d)\n", hexStr.c_str(), hexValue, hexValue);
+					}
+
 					rawValue = static_cast<double>(hexValue);
 					validValue = true;
-					TRACE("HEX 값 변환: %s → %.0f\n", hexStr.c_str(), rawValue);
 				}
 				catch (...) {
 					TRACE("HEX 변환 실패: %s\n", hexStr.c_str());
@@ -499,9 +511,23 @@ bool CJsonParser::ApplyValueToTagWithScale(TagConfigEntry* pConfig) const
 		}
 		else if (pValue->is_number()) {
 			// 숫자인 경우
-			rawValue = pValue->get<double>();
+			double numValue = pValue->get<double>();
+
+			// ⭐ IFM 프로토콜: 큰 숫자(32bit)는 상위 16bit만 사용
+			// 예: 35913984 (0x02240100) → 상위 16bit(0x0224) = 548
+			if (numValue >= 65536) {  // 0x10000 이상이면 32bit로 간주
+				unsigned long fullValue = static_cast<unsigned long>(numValue);
+				unsigned long upper16 = (fullValue >> 16) & 0xFFFF;
+				TRACE("숫자 32bit → 상위 16bit 추출: %.0f (0x%08X) → 0x%04X (%d)\n",
+					numValue, fullValue, upper16, upper16);
+				rawValue = static_cast<double>(upper16);
+			}
+			else {
+				// 작은 숫자는 그대로 사용
+				TRACE("숫자 값: %.2f\n", numValue);
+				rawValue = numValue;
+			}
 			validValue = true;
-			TRACE("숫자 값: %.2f\n", rawValue);
 		}
 		else {
 			TRACE("지원하지 않는 데이터 타입\n");

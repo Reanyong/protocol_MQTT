@@ -79,7 +79,6 @@ private:
 	void StartEditingCell(int item, int subItem);
 
 	// 인라인 편집 관련
-	CEdit* m_pEditCtrl;
 	int m_editItem;
 	int m_editSubItem;
 	void EndEditing(bool save);
